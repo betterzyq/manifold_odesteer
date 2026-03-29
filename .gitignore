@@ -22,6 +22,9 @@ shells/
 # Data
 texts/
 activations/
+# 体积过大或为下载产物，请用 data/toxicity.sh 等脚本获取，勿提交到 Git
+data/toxicity/jigsaw/
+data/toxicity/real_tox_prompts/
 
 # File
 *.out

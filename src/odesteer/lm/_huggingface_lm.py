@@ -1,3 +1,16 @@
+import os
+
+from pathlib import Path
+
+from ..utils.env import load_project_dotenv
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+load_project_dotenv(_PROJECT_ROOT, override=False)
+
+# 在导入 transformers/huggingface_hub 前设置镜像（未配置时）
+if "HF_ENDPOINT" not in os.environ:
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
 from typing import Optional, Callable
 from functools import partial
 from tqdm import trange
@@ -14,6 +27,7 @@ from transformers import PreTrainedTokenizer, PreTrainedModel
 from transformers import GenerationConfig
 
 from ._config import _DEFAULT_SAMPLING_PARAMS, _FULL_LLM_NAMES, _DEFAULT_CHAT_TEMPLATE
+from ._hub_local import get_hub_cache_dir_str, maybe_resolve_pretrained_to_local_path
 from ..steer import get_steer_model
 
 
@@ -27,23 +41,56 @@ class HuggingFaceLM:
         steer_layer_idx: Optional[int] = None,
         device: Optional[str] = None,
         dtype: torch.dtype = torch.float32,
+        local_files_only: Optional[bool] = None,
     ):
         # set device and dtype
         if device is None:
            device = "auto" if torch.cuda.is_available() else "cpu"
         self.dtype = dtype
-        
+
+        pretrained_name = (
+            _FULL_LLM_NAMES[model_name] if model_name in _FULL_LLM_NAMES.keys() else model_name
+        )
+
+        cache_dir = get_hub_cache_dir_str()
+
+        if isinstance(pretrained_name, str) and Path(pretrained_name).exists():
+            pretrained_name = str(Path(pretrained_name).resolve())
+        else:
+            pretrained_name = maybe_resolve_pretrained_to_local_path(
+                pretrained_name,
+                Path(cache_dir) if cache_dir else None,
+            )
+            if Path(pretrained_name).exists():
+                pretrained_name = str(Path(pretrained_name).resolve())
+
+        # 离线 / 已解析到本地 snapshot 目录：不访问 Hub
+        if local_files_only is None:
+            resolved_local = (
+                Path(pretrained_name).is_dir()
+                and (Path(pretrained_name) / "config.json").is_file()
+            )
+            local_files_only = (
+                os.environ.get("HF_HUB_OFFLINE", "0") == "1"
+                or os.environ.get("ODESteer_OFFLINE", "0") == "1"
+                or os.environ.get("ODESteer_LOCAL_ONLY", "0") == "1"
+                or resolved_local
+            )
+
         # set model and tokenizer
         self.model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(
-            _FULL_LLM_NAMES[model_name] if model_name in _FULL_LLM_NAMES.keys() else model_name, 
-            device_map = device, 
+            pretrained_name,
+            device_map = device,
             torch_dtype = self.dtype,
-            # trust_remote_code=True, 
+            local_files_only = local_files_only,
+            cache_dir = cache_dir,
         )
         self.tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(
-            _FULL_LLM_NAMES[model_name] if model_name in _FULL_LLM_NAMES.keys() else model_name, 
-            device_map = device, 
+            pretrained_name,
+            device_map = device,
             torch_dtype = self.dtype,
+            local_files_only = local_files_only,
+            cache_dir = cache_dir,
         )
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.padding_side = 'left' 
@@ -221,7 +268,7 @@ class HuggingFaceLM:
         self,
         messages: list[list[dict]],
         layer_idx: Optional[int] = None,
-    ) -> list[Tensor]:
+    ) -> Tensor:
         assert self.tokenizer.chat_template is not None, "Chat template is not set"
         formatted_prompts = self.tokenizer.apply_chat_template(
             messages,
@@ -230,23 +277,74 @@ class HuggingFaceLM:
             continue_final_message = False,
         )
         return self.extract_prompt_eos_activations(formatted_prompts, layer_idx)
-    
-    
+
+    def _num_decoder_layers(self) -> int:
+        if isinstance(self.model, GPTNeoXForCausalLM):
+            return len(self.model.gpt_neox.layers)
+        if isinstance(self.model, FalconForCausalLM):
+            return len(self.model.transformer.h)
+        return len(self.model.model.layers)
+
+    def _get_layer_module(self, layer_idx: int) -> nn.Module:
+        if isinstance(self.model, GPTNeoXForCausalLM):
+            return self.model.gpt_neox.layers[layer_idx]
+        if isinstance(self.model, FalconForCausalLM):
+            return self.model.transformer.h[layer_idx]
+        return self.model.model.layers[layer_idx]
+
+    def _forward_max_length_tokens(self) -> int:
+        """Context length for a single forward (truncation); capped to limit attention memory."""
+        cfg = self.model.config
+        n = getattr(cfg, "max_position_embeddings", None) or getattr(cfg, "seq_length", None)
+        tm = self.tokenizer.model_max_length
+        parts: list[int] = []
+        if isinstance(n, int) and n > 0:
+            parts.append(n)
+        if isinstance(tm, int) and 0 < tm < 10**9:
+            parts.append(tm)
+        m = min(parts) if parts else 2048
+        return min(m, 8192)
+
     @torch.no_grad()
     def extract_prompt_eos_activations(
         self,
         prompts: list[str],
         layer_idx: Optional[int] = None,
-    ) -> list[Tensor]:
+    ) -> Tensor:
         if layer_idx is None:
-            layer_idx = len(self.model.model.layers) // 2 - 1
-        inputs = self.tokenizer(prompts, return_tensors = 'pt', padding = True).to(self.model.device)
-        outputs = self.model(**inputs, output_hidden_states = True)
-        hidden_states = outputs.hidden_states[1:][layer_idx]
-        # left padding settings
+            layer_idx = max(self._num_decoder_layers() // 2 - 1, 0)
+        max_len = self._forward_max_length_tokens()
+        old_trunc = self.tokenizer.truncation_side
+        self.tokenizer.truncation_side = "left"
+        try:
+            inputs = self.tokenizer(
+                prompts,
+                return_tensors = "pt",
+                padding = True,
+                max_length = max_len,
+                truncation = True,
+            ).to(self.model.device)
+        finally:
+            self.tokenizer.truncation_side = old_trunc
+
+        captured: list[Tensor] = []
+
+        def capture_hook(_module: nn.Module, _inp: tuple, out) -> None:
+            hidden, _ = _extract_and_set_hidden(out)
+            captured.append(hidden.detach())
+
+        handle = self._get_layer_module(layer_idx).register_forward_hook(capture_hook)
+        try:
+            self.model(**inputs)
+        finally:
+            handle.remove()
+        if not captured:
+            raise RuntimeError("extract_prompt_eos_activations: forward hook did not run.")
+        hidden_states = captured[0]
+        # left padding: last index is the final token of the (possibly truncated) sequence
         return hidden_states[:, -1, :]
+
         
-    
     def register_steer_hook(
         self, 
         steer_position_idx: int,
@@ -328,12 +426,7 @@ class HuggingFaceLM:
         return reassemble(hidden)
     
     def _get_target_layer(self) -> nn.Module:
-        if isinstance(self.model, GPTNeoXForCausalLM):
-            return self.model.gpt_neox.layers[self.steer_layer_idx]
-        elif isinstance(self.model, FalconForCausalLM):
-            return self.model.transformer.h[self.steer_layer_idx]
-        else:
-            return self.model.model.layers[self.steer_layer_idx]
+        return self._get_layer_module(self.steer_layer_idx)
         
 
 

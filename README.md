@@ -41,10 +41,27 @@ This repository provides code for ODESteer, a novel activation steering approach
    echo "GOOGLE_API_KEY=your_api_key_here" > .env
    ```
 
-   b. Export the environment file:
+   b. Export the environment file so that `uv run` loads it:
    ```bash
    export UV_ENV_FILE=.env
    ```
+   To make this permanent, add the above line to your `~/.bashrc` or `~/.zshrc`.
+
+5. **Hugging Face 国内镜像（中国大陆用户）**
+
+   若无法访问 huggingface.co，请在项目根目录的 `.env` 中加入（或使用已配置好的 `.env`）：
+   ```
+   HF_ENDPOINT=https://hf-mirror.com
+   ```
+   并确保已设置 `UV_ENV_FILE` 指向该 `.env`（见步骤 4b），这样 `uv run` 下所有模型与数据集下载会走 [hf-mirror](https://hf-mirror.com)，长期生效。
+
+6. **模型/数据集缓存到数据盘（系统盘空间不足时）**
+
+   默认缓存目录为 `~/.cache/huggingface`（在系统盘）。若租赁服务器系统盘小、数据盘大，可在 `.env` 中设置：
+   ```
+   HF_HOME=/root/autodl-tmp/.cache/huggingface
+   ```
+   将路径改为你的数据盘挂载点（如 `/data`、`/mnt/data` 等），模型与数据集会下载到该目录下，避免占满系统盘。
 
 ## Quick Start
 
@@ -78,6 +95,34 @@ These scripts will:
 - Extract activations from the specified model at the specified layer
 
 **Note**: For toxicity data preparation, you need Kaggle API credentials configured (`~/.kaggle/kaggle.json`).
+
+### Offline / No Network (无网络或离线)
+
+When Hugging Face is unreachable (e.g. `Network is unreachable`):
+
+1. **Use local cache only** (dataset and models must be cached first, e.g. from a previous run with network):
+   ```bash
+   export HF_HUB_OFFLINE=1
+   uv run bash data/truthfulqa.sh
+   ```
+   Or: `export ODESteer_OFFLINE=1` (same effect).
+
+2. **Use a local model path** instead of downloading: pass the path to the model directory with `-m` when running scripts (e.g. `-m /path/to/Llama-3.1-8B`). The dataset still needs to be in cache or loaded once with network.
+
+3. **TruthfulQA 数据**：若已用 ModelScope 下载到 `data/truthfulqa/truthful_qa_raw`，无需设置 `TRUTHFULQA_LOCAL_DIR`，格式化脚本会自动使用该目录。只跑一个本地模型时：`TRUTHFULQA_MODEL=/path/to/Llama-3.1-8B TRUTHFULQA_LAYER=13 uv run bash data/truthfulqa.sh`（并设 `HF_HUB_OFFLINE=1` 若需强制离线）。
+
+### Where to Put Existing Data and Models (已有数据/模型放置位置)
+
+Assume project root is `odesteer/` (the repo directory).
+
+| 类型 | 放置位置 | 说明 |
+|------|----------|------|
+| **TruthfulQA 已格式化文本** | `odesteer/data/truthfulqa/texts/` | 放入 `pos_0.jsonl`, `pos_1.jsonl`, `neg_0.jsonl`, `neg_1.jsonl`（每行 JSON 含 `idx`, `question`, `answer`）。放好后可**跳过** `format_dataset.py`，直接运行 `extract_activations.py`。 |
+| **TruthfulQA（ModelScope 下载）** | 建议 `odesteer/data/truthfulqa/truthful_qa_raw` | 使用 `modelscope download --dataset evalscope/truthful_qa --local_dir ./data/truthfulqa/truthful_qa_raw`（在项目根 `odesteer/` 下执行）。下载后设置 `export TRUTHFULQA_LOCAL_DIR=./data/truthfulqa/truthful_qa_raw`，再运行 `uv run python -u data/truthfulqa/format_dataset.py`，会从该目录读取并生成 `texts/` 下的 jsonl。 |
+| **TruthfulQA 原始数据集缓存** | `~/.cache/huggingface/datasets/` | 从有网络的机器复制整个 `datasets/` 目录到此路径，保持内部结构（如 `truthfulqa___truthful_qa/`）。然后设置 `HF_HUB_OFFLINE=1` 再跑 `format_dataset.py`。 |
+| **模型（任意路径）** | 任意目录，如 `/root/models/Llama-3.1-8B` | 目录内需包含 `config.json`、权重文件等。运行脚本时用 `-m /root/models/Llama-3.1-8B` 指定。提取的 activations 会写入 `odesteer/data/truthfulqa/activations/<模型名或路径名>/`。 |
+| **模型（HF 缓存格式）** | `~/.cache/huggingface/hub/` | 从别处复制 `hub/` 下对应模型目录（如 `models--meta-llama--Llama-3.1-8B/`），设置 `HF_HUB_OFFLINE=1`，脚本中仍用 `-m Llama3.1-8B-Base`。 |
+| **提取好的 activations** | `odesteer/data/truthfulqa/activations/<ModelName>/` | 例如 `pos_0_activations_layer13.pt`, `pos_0_question_idx.pt`, `neg_0_activations_layer13.pt` 等。与 `texts/` 中的文件名对应，后续评估/生成会从这里读。 |
 
 ## Running Experiments
 

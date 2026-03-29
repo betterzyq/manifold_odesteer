@@ -1,6 +1,16 @@
 import argparse
+import os
 import re
 from pathlib import Path
+
+# 须在 import transformers 之前：加载 .env（HF_HOME）、默认镜像，与 odesteer.lm._huggingface_lm 一致
+from odesteer.utils import get_project_dir
+from odesteer.utils.env import load_project_dotenv
+
+load_project_dotenv(get_project_dir(), override=False)
+if "HF_ENDPOINT" not in os.environ:
+    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
 from tqdm import tqdm
 
 import numpy as np
@@ -8,7 +18,7 @@ import pandas as pd
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-from odesteer.utils import get_project_dir
+from odesteer.lm._hub_local import hf_pretrained_hub_kwargs
 
 
 ultrafeedback_df_cols = [
@@ -57,12 +67,27 @@ class UltrafeedbackEvaluator:
     def __init__(self, reward_model_name: str = "Skywork/Skywork-Reward-V2-Llama-3.1-8B", device: str = "auto"):
         """Initialize reward model for evaluation."""
         print(f"Loading reward model: {reward_model_name}")
-        self.tokenizer = AutoTokenizer.from_pretrained(reward_model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(
-            reward_model_name,
-            torch_dtype=torch.bfloat16,
-            device_map=device,
-        )
+        rm_resolved, rm_kw = hf_pretrained_hub_kwargs(reward_model_name)
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(rm_resolved, **rm_kw)
+            self.model = AutoModelForSequenceClassification.from_pretrained(
+                rm_resolved,
+                torch_dtype=torch.bfloat16,
+                device_map=device,
+                **rm_kw,
+            )
+        except OSError as e:
+            hub_name = "models--" + reward_model_name.replace("/", "--")
+            raise RuntimeError(
+                "无法加载 Ultrafeedback 奖励模型（与 detox_eval 不同，此处需要 Skywork RM，且需能在本地 hub 中解析）。\n"
+                "请检查：1) 已在 hub 中下载该模型，目录类似 "
+                f"…/hub/{hub_name}/snapshots/<hash>/；\n"
+                "2) 在 .env 中设置 HF_HOME=/path/to/.cache/huggingface（父目录，不是 hub 子目录），"
+                "或设置 HF_HUB_CACHE 指向 …/huggingface/hub；\n"
+                "3) 离线时 export HF_HUB_OFFLINE=1，并确保 snapshot 完整；\n"
+                "4) 或使用 -r 传入本地 snapshot 目录路径。\n"
+                f"当前解析路径: {rm_resolved!r}, local_files_only={rm_kw.get('local_files_only')}"
+            ) from e
         self.model.eval()
 
     @torch.no_grad()

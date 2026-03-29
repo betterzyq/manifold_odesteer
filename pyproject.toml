@@ -29,6 +29,7 @@ dependencies = [
     "openpyxl>=3.1.5",
     "pandas>=2.2.3",
     "pot>=0.9.5",
+    "pysocks>=1.7.1",
     "ruff>=0.11.12",
     "scikit-learn>=1.6.1",
     "scipy>=1.15.3",
@@ -43,6 +44,12 @@ dependencies = [
 
 [project.scripts]
 odesteer = "odesteer:main"
+
+[tool.uv]
+# 使用国内镜像加速依赖下载（可选：清华 / 阿里云 / 华为等）
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+# 若部分包（如 PyTorch）在镜像不全，可保留官方源作补充：
+# extra-index-url = "https://download.pytorch.org/whl/cu124"
 
 [build-system]
 requires = ["hatchling"]
