@@ -155,9 +155,16 @@ uv run python data/extract_manifold.py \
 | `vk_path` | str / null | `V_k` 的 `.pt` 文件路径（与 `use_manifold=true` 联用） |
 | `V_k` | Tensor（可选） | 若由外部代码注入，可直接传张量；通常由 CLI 合并逻辑从 `vk_path` 加载 |
 | `manifold_dim` | int | 加载后对 `V_k` 按列截断的上限；若文件列数小于该值则不变 |
-| `use_manifold_retraction` | bool | 是否做保范数收回；当 `use_manifold=true` 时，实现中会自动**至少**在语义上保证与流形流程配套（见源码中 `or use_manifold`） |
+| `use_manifold_retraction` | bool | **保范数收回**：积分/单步后按输入范数缩放。与 `use_manifold`/`V_k` **无关**时，表示 **欧氏 ODESteer + 仅收回**（消融：探究投影的作用）；与 `use_manifold` 联用时见下表 |
 
 **注意**：仅配置 `vk_path` 而不将 `use_manifold` 设为 `true` 时，**不会**从路径加载 `V_k`，避免误开流形。
+
+**消融对应关系（CLI / Hydra，见 5.3）**：
+
+1. **Vanilla ODESteer / StepODESteer**：不加流形相关参数。  
+2. **StepODESteer + 投影 + 收回** 或 **ODESteer + 投影 + 收回**：`use_manifold` + `vk_path` + `use_manifold_retraction=true`。  
+3. **ODESteer + 仅投影**：`use_manifold` + `vk_path`，`use_manifold_retraction=false`。  
+4. **ODESteer + 仅保范数（无投影，欧氏梯度 + 收回）**：只设 **`steer.kwargs.use_manifold_retraction=true`**，**不要**设 `use_manifold` / `vk_path`（或 CLI 仅 `--use_manifold_retraction`）。输出文件名自动带 **`-NormRetr`**，与 Vanilla 区分。
 
 已接入流形 CLI 合并的入口脚本：
 
@@ -169,7 +176,7 @@ uv run python data/extract_manifold.py \
 
 ### 5.2 方式一：纯 Hydra（推荐）
 
-TruthfulQA 示例（路径请换成你机器上的实际文件）：
+TruthfulQA 示例（路径请换成你机器上的实际文件）。**完整 Manifold（投影 + 收回）**请显式打开 `use_manifold_retraction`：
 
 ```bash
 uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
@@ -178,9 +185,12 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
   steer=ODESteer \
   steer.T=5.0 \
   steer.kwargs.use_manifold=true \
+  steer.kwargs.use_manifold_retraction=true \
   steer.kwargs.vk_path=/绝对路径/odesteer/data/truthfulqa/activations/Llama3.1-8B-Base/manifold_Vk_layer13.pt \
   steer.kwargs.manifold_dim=128
 ```
+
+**仅投影（消融）**：省略 `steer.kwargs.use_manifold_retraction` 或设为 `false`（与 CLI 仅 `--use_manifold` 行为一致）。
 
 UltraFeedback / 毒性任务：将脚本与顶层 `config_name` 换成 `ultrafeedback`、`detox`（与 README 一致），流形相关覆盖仍使用 **`steer.kwargs.*`**。
 
@@ -196,17 +206,18 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
   steer.kwargs.vk_path=/path/to/manifold_Vk_layer13.pt
 ```
 
-### 5.3 方式二：`--use_manifold` + `--vk_path` + `--manifold_dim`
+### 5.3 方式二：流形相关 CLI（与 Hydra 混用）
 
-以下三个参数在脚本导入阶段会从 `sys.argv` 中**剥离**后再交给 Hydra，因此可与 `model=...` 等任意混排（建议把路径写清楚，避免被 shell 错误拆分）：
+以下参数在脚本导入阶段会从 `sys.argv` 中**剥离**后再交给 Hydra，因此可与 `model=...` 等任意混排（多行续写时每行末尾需有 `\`，最后一行除外）。
 
 | 标志 | 说明 |
 |------|------|
-| `--use_manifold` | 开启流形：会设置 `use_manifold` 与 `use_manifold_retraction`，并从路径加载 `V_k` |
+| `--use_manifold` | 开启流形：加载 `V_k`、启用**切空间投影**；**默认不**开启保范数收回（仅投影消融） |
+| `--use_manifold_retraction` | 与 `--use_manifold` 联用：开启**保范数收回**（完整 ODE-Manifold，生成通常更稳） |
 | `--vk_path` | `V_k` 文件路径；若省略则尝试使用 Hydra 里已配置的 **`steer.kwargs.vk_path`** |
 | `--manifold_dim` | 默认 `128`；对加载的 `V_k` 按列截断 |
 
-示例：
+**仅投影（消融）**：
 
 ```bash
 uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
@@ -219,6 +230,33 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
   steer.T=5.0
 ```
 
+**投影 + 收回（推荐）**：
+
+```bash
+uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
+  --use_manifold \
+  --use_manifold_retraction \
+  --vk_path /path/to/manifold_Vk_layer13.pt \
+  --manifold_dim 128 \
+  model=Llama3.1-8B-Base \
+  layer_idx=13 \
+  steer=ODESteer \
+  steer.T=5.0
+```
+
+**欧氏 ODESteer + 仅保范数收回（消融 4，无 `V_k`）** — 输出带 **`-NormRetr`**：
+
+```bash
+uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
+  model=Llama3.1-8B-Base \
+  layer_idx=13 \
+  steer=ODESteer \
+  steer.T=5.0 \
+  steer.kwargs.use_manifold_retraction=true
+```
+
+或 CLI：`--use_manifold_retraction`（不要加 `--use_manifold`）。
+
 若 `--use_manifold` 已加，但未提供 `--vk_path` 且配置里也没有 **`steer.kwargs.vk_path`**，运行时会抛出明确错误。
 
 ---
@@ -226,7 +264,7 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
 ## 6. 与主 README 的交叉引用
 
 - **论文中 ODESteer 的 `T` 取值**：仍请参考主 README「ODESteer: range of T (paper Table 5)」；ODE-Manifold 不改变 `T` 的含义，但投影与收回会改变实际轨迹，可能需要小幅重调 `T`。
-- **输出文件名与原版共存**：启用流形（`steer.kwargs.use_manifold=true` 或已注入 `V_k`）时，生成脚本会在 Hydra 解析得到的 `steer.name` 后**自动追加** `-Manifold-k{manifold_dim}`，再写入 `raw_outputs`。因此**不会**与未开流形的同名 `ODESteer-...-T5.0` 文件冲突，也不会因「文件已存在」而误跳过。评估脚本会把整段方法名解析为 **Steering Method**，原版与 Manifold 会对应 **CSV 中两行**，互不覆盖。
+- **输出文件名与原版共存**：流形实验为 **`-Manifold-k{k}`** / **`-Manifold-k{k}-proj`**；**仅欧氏 + 收回** 为 **`-NormRetr`**，与 Vanilla 及彼此区分，避免跳过或覆盖评估行。
 - **自定义命名**：若已在 `steer.name` 里手写包含 `Manifold-k{k}`，脚本**不会**重复追加（见 `steer_name_with_manifold_suffix`）。
 - **跳过已存在结果**：同一 **完整** 文件名（含 `-Manifold-k128` 等）已存在时仍会跳过；重跑 Manifold 实验前请删除或改名该 Manifold 专用 `jsonl`（主 README 对原版同理）。
 

@@ -39,8 +39,6 @@ class BaseStepODESteer(Steer):
         if use_manifold and self.V_k is None:
             raise ValueError("use_manifold=True requires V_k or vk_path in kwargs")
 
-        self.use_manifold_retraction = self.use_manifold_retraction or use_manifold
-
         clf_kwargs = {k: v for k, v in kwargs.items() if k not in _MANIFOLD_STEER_KEYS}
         self.clf = self._init_clf(**clf_kwargs)
         
