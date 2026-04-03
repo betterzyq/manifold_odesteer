@@ -1,4 +1,5 @@
 import argparse
+import gc
 from tqdm import trange
 
 import pandas as pd
@@ -78,6 +79,9 @@ if __name__ == '__main__':
                 batch_responses = responses[start_idx:end_idx]
                 batch_activations = extract_func(model, batch_prompts, batch_responses, layer_idx = layer_idx).cpu()
                 activations_lst.append(batch_activations)
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
             activations = torch.cat(activations_lst, dim = 0)
             torch.save(df.idx.values, activations_dir / f'{file.stem}_idx.pt')

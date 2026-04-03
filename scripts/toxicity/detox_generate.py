@@ -10,6 +10,13 @@ from lightning import seed_everything
 from odesteer.lm import HuggingFaceLM, batch_generate
 from odesteer.utils import get_project_dir
 from odesteer.utils.data import load_jigsaw_activations, load_rtp_prompts
+from odesteer.utils.manifold_cli import (
+    merge_manifold_cli_into_steer_kwargs,
+    steer_name_with_manifold_suffix,
+    strip_manifold_flags_from_argv,
+)
+
+_MANIFOLD_CLI_ARGS = strip_manifold_flags_from_argv()
 
 
 @hydra.main(
@@ -21,7 +28,13 @@ def main(cfg: DictConfig):
     seed_everything(cfg.seed)
     output_dir: Path = get_project_dir() / "results" / "toxicity" / "raw_outputs" / cfg.model
     output_dir.mkdir(parents = True, exist_ok = True)
-    filename = f"{cfg.model}-l{cfg.layer_idx}-{cfg.steer.name}-RealToxicityPrompts-seed{cfg.seed}.jsonl"
+
+    steer_model_kwargs = OmegaConf.to_container(cfg.steer.kwargs, resolve = True)
+    steer_model_kwargs = merge_manifold_cli_into_steer_kwargs(
+        steer_model_kwargs, _MANIFOLD_CLI_ARGS
+    )
+    steer_run_name = steer_name_with_manifold_suffix(str(cfg.steer.name), steer_model_kwargs)
+    filename = f"{cfg.model}-l{cfg.layer_idx}-{steer_run_name}-RealToxicityPrompts-seed{cfg.seed}.jsonl"
     if (output_dir / filename).exists():
         print(f"✓ Output file {filename} already exists. Skipping RealToxicityPrompts generation.")
         print("-" * 120)    
@@ -33,7 +46,6 @@ def main(cfg: DictConfig):
             max_new_tokens = 50, do_sample = True, temperature = 0.7,
             top_p = 0.9, repetition_penalty = 1.1, seed = cfg.seed 
         )
-        steer_model_kwargs = OmegaConf.to_container(cfg.steer.kwargs, resolve = True)
             
         model = HuggingFaceLM(
             cfg.model, cfg.steer.type,
@@ -63,13 +75,13 @@ def main(cfg: DictConfig):
                     {
                         "prompt": prompt, 
                         "output": output,    
-                        "generator": f"{cfg.model}-{cfg.steer.name}",
+                        "generator": f"{cfg.model}-{steer_run_name}",
                         "dataset": "realtoxicityprompts",
                         "T": cfg.steer.T,
                     }
                 ) + "\n")
         
-        print(f"✓ Completed {cfg.model}-{cfg.steer.name} on real-toxicity-prompts with training on Jigsaw")
+        print(f"✓ Completed {cfg.model}-{steer_run_name} on real-toxicity-prompts with training on Jigsaw")
         print(f"  Total responses generated: {len(outputs)}")
         print(f"  Configuration: T={cfg.steer.T}")
         print("-" * 120)

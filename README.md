@@ -25,6 +25,7 @@ This repository provides code for ODESteer, a novel activation steering approach
    git clone git@github.com:ZhaoHongjue/odesteer.git
    cd odesteer
    ```
+   （若使用本仓库维护者的 fork，将 URL 换为你的远程即可。）
 
 3. **Install dependencies**:
    ```bash
@@ -62,6 +63,23 @@ This repository provides code for ODESteer, a novel activation steering approach
    HF_HOME=/root/autodl-tmp/.cache/huggingface
    ```
    将路径改为你的数据盘挂载点（如 `/data`、`/mnt/data` 等），模型与数据集会下载到该目录下，避免占满系统盘。
+
+7. **环境变量模板**
+
+   项目根目录提供 `.env.example`，可复制为 `.env` 后按需填写（`GOOGLE_API_KEY`、`HF_ENDPOINT`、`HF_HOME` 等）。若使用 `uv run`，建议设置 `export UV_ENV_FILE=.env` 以便子进程自动加载（见步骤 4b）。
+
+### 本地 Hub 解析与离线加载（实现说明摘要）
+
+本仓库在 **`src/odesteer/lm/_hub_local.py`** 中实现了 Hugging Face **repo id → 本地 `hub` 下 snapshot 目录** 的解析，并在 **`HuggingFaceLM`**、**`utils/metric.py`**（TruthfulQA judge、质量模型、毒性评估前的环境加载）及 **`ultrafeedback_eval.py`** 等处统一使用 **`hf_pretrained_hub_kwargs`**：
+
+- **`HF_HUB_CACHE`** 或 **`HF_HOME/hub`**：指定模型缓存的 `hub` 根目录（`models--org--repo` 所在层）。
+- 若**未**设置上述变量，会依次尝试探测常见路径：`/root/autodl-tmp/.cache/huggingface/hub`、`~/.cache/huggingface/hub`（目录存在则使用），便于数据盘部署而无需手写 `.env`。
+- 若已成功解析到带 `config.json` 的本地 snapshot，或设置 **`HF_HUB_OFFLINE=1`** / **`ODESteer_OFFLINE=1`** / **`ODESteer_LOCAL_ONLY=1`**，则 **`local_files_only=True`**，避免再访问 Hub。
+- **`HF_ENDPOINT`**（如 `https://hf-mirror.com`）须在 **`import transformers` 之前**写入环境变量；`_huggingface_lm.py` 与 **`ultrafeedback_eval.py`** 会在导入前加载项目根 `.env` 并设置默认镜像（未配置时）。
+
+## ODE-Manifold（流形扩展）
+
+在标准 ODESteer 上增加**切空间投影**与**保范数收回**的推理期扩展，详细步骤、CLI 与 Hydra 配置见 **[ODE_Manifold_使用教程.md](ODE_Manifold_使用教程.md)**。
 
 ## Quick Start
 
@@ -143,6 +161,10 @@ uv run python -u scripts/ultrafeedback/ultrafeedback_eval.py -m <MODEL> -l <LAYE
 ```
 The command will automatically evaluate all steering methods with the specific model and layer.
 
+**Ultrafeedback 奖励模型（RM）**：评估依赖 **Skywork/Skywork-Reward-V2-Llama-3.1-8B**（与 `detox_eval` 所用的 Perspective / GPT2-XL 不同）。请将该模型完整缓存到上述 `hub` 目录，或设置 **`HF_HOME` / `HF_HUB_CACHE`**；离线时设置 **`HF_HUB_OFFLINE=1`**。也可用 **`-r /本地/snapshot路径`** 指定 RM 目录。若 RM 不在缓存且无法联网，评估会在加载阶段失败。
+
+**重新生成与重新评估**：`ultrafeedback_generate.py` 在对应 **`raw_outputs/...jsonl` 已存在时会直接跳过**；`ultrafeedback_eval.py` 若统计 CSV 中已有同一 **Steering Method** 行也会跳过。需重跑时请删除（或改名）旧 **jsonl** 及 CSV 中对应行后再执行。
+
 **Example - Compare ODESteer with baseline methods**:
 ```bash
 # No steering (baseline)
@@ -202,11 +224,24 @@ uv run python -u scripts/toxicity/detox_eval.py -m <MODEL> -l <LAYER> -d
 | Model Name | HuggingFace Path | Recommended Layer |
 |------------|-----------------|-------------------|
 | `Llama3.1-8B-Base` | `meta-llama/Llama-3.1-8B` | 13 |
-| `Mistral-7B-Base` | `mistralai/Mistral-7B-v0.1` | 15 |
+| `Mistral-7B-Base` | `mistralai/Mistral-7B-v0.3` | 15 |
 | `Falcon-7B-Base` | `tiiuae/falcon-7b` | 14 |
 | `Qwen2.5-7B-Base` | `Qwen/Qwen2.5-7B` | 13 |
 
 **Note:** The steering layer indices reported in our paper differ slightly from those used here, as this implementation starts counting from zero.
+
+### ODESteer: range of \(T\) (paper Table 5)
+
+复现实验时，**ODESteer** 的 **`steer.T`** 建议在论文 **Table 5** 给出的区间内选取（或在该区间内网格搜索）。与上表模型名的对应关系如下：
+
+| HuggingFace checkpoint | 代码中 `model=` | Range of \(T\) |
+|------------------------|-----------------|----------------|
+| `meta-llama/Llama-3.1-8B` | `Llama3.1-8B-Base` | 4–6 |
+| `mistralai/Mistral-7B-v0.3` | `Mistral-7B-Base` | 3–4 |
+| `tiiuae/falcon-7b` | `Falcon-7B-Base` | 20–23 |
+| `Qwen/Qwen2.5-7B` | `Qwen2.5-7B-Base` | 13–16（**去毒 / RealToxicityPrompts 任务建议约 48**） |
+
+其他 steering 方法：`RepE` / `CAA` / `ITI` 中 **`T` 为向量加法系数** `X + T·v`，默认常从 **`steer.T=1.0`** 开始；**`MiMiC` / `LinAcT`** 当前实现**未使用** `T`；**`NoSteer`** 无需设置 **`steer.T`**。详见各 `confs/steer/*.yaml`。
 
 ### Steering Methods
 
@@ -246,9 +281,12 @@ odesteer/
 │   ├── truthfulqa/         # TruthfulQA data processing
 │   └── toxicity/           # Toxicity data processing
 ├── confs/                  # Hydra configuration files
-├── results/                # Generated outputs (auto-created)
+├── .env.example            # 环境变量模板（复制为 .env，勿提交密钥）
+├── results/                # Generated outputs (auto-created, gitignored)
 └── pyproject.toml          # Project dependencies
 ```
+
+**Git 与大数据**：`.gitignore` 默认忽略 `results/`、各数据集的 `texts/`、`activations/`、体积较大的 `data/toxicity/jigsaw/` 与 `data/toxicity/real_tox_prompts/` 等。大文件**不会**随 `git checkout` 恢复，需自行备份或使用 DVC / Git LFS 等方案。
 
 ## Citation
 

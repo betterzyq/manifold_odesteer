@@ -305,6 +305,30 @@ class HuggingFaceLM:
         m = min(parts) if parts else 2048
         return min(m, 8192)
 
+    def _forward_for_activation_capture(self, inputs) -> None:
+        """
+        Run a lightweight forward pass that still executes decoder layers.
+        Prefer backbone-only forward to avoid allocating full-vocab logits
+        from lm_head, which can OOM during activation extraction.
+        """
+        kwargs = {
+            "input_ids": inputs.input_ids,
+            "attention_mask": inputs.attention_mask,
+            "use_cache": False,
+            "return_dict": False,
+        }
+        if hasattr(self.model, "model"):  # Llama/Qwen/Mistral style
+            self.model.model(**kwargs)
+            return
+        if hasattr(self.model, "transformer"):  # Falcon style
+            self.model.transformer(**kwargs)
+            return
+        if hasattr(self.model, "gpt_neox"):  # GPTNeoX style
+            self.model.gpt_neox(**kwargs)
+            return
+        # Fallback: may compute logits for unknown architectures.
+        self.model(**kwargs)
+
     @torch.no_grad()
     def extract_prompt_eos_activations(
         self,
@@ -335,7 +359,7 @@ class HuggingFaceLM:
 
         handle = self._get_layer_module(layer_idx).register_forward_hook(capture_hook)
         try:
-            self.model(**inputs)
+            self._forward_for_activation_capture(inputs)
         finally:
             handle.remove()
         if not captured:

@@ -12,6 +12,13 @@ from odesteer.lm import HuggingFaceLM, batch_chat
 from odesteer.utils import get_project_dir
 from odesteer.utils.data import load_tqa_gen_data
 from odesteer.utils.data import load_tqa_gen_questions
+from odesteer.utils.manifold_cli import (
+    merge_manifold_cli_into_steer_kwargs,
+    steer_name_with_manifold_suffix,
+    strip_manifold_flags_from_argv,
+)
+
+_MANIFOLD_CLI_ARGS = strip_manifold_flags_from_argv()
 
 
 truthfulqa_system_prompt = (
@@ -29,7 +36,13 @@ def main(cfg: DictConfig):
     seed_everything(cfg.seed)
     output_dir: Path = get_project_dir() / "results" / "truthfulqa" / "raw_outputs" / cfg.model
     output_dir.mkdir(parents = True, exist_ok = True)
-    filename = f"{cfg.model}-l{cfg.layer_idx}-{cfg.steer.name}-TruthfulQA-seed{cfg.seed}.jsonl"
+
+    steer_model_kwargs = OmegaConf.to_container(cfg.steer.kwargs, resolve = True)
+    steer_model_kwargs = merge_manifold_cli_into_steer_kwargs(
+        steer_model_kwargs, _MANIFOLD_CLI_ARGS
+    )
+    steer_run_name = steer_name_with_manifold_suffix(str(cfg.steer.name), steer_model_kwargs)
+    filename = f"{cfg.model}-l{cfg.layer_idx}-{steer_run_name}-TruthfulQA-seed{cfg.seed}.jsonl"
     if (output_dir / filename).exists():
         print(f"✓ Output file {filename} already exists. Skipping TruthfulQA generation.")
         print("-" * 120)
@@ -37,7 +50,7 @@ def main(cfg: DictConfig):
     
     try:
         all_prompts, all_outputs = [], []
-        print(f"→ Running 2-fold cross-validation for {cfg.model}-{cfg.steer.name} on layer {cfg.layer_idx}")
+        print(f"→ Running 2-fold cross-validation for {cfg.model}-{steer_run_name} on layer {cfg.layer_idx}")
         
         for test_split_idx in [0, 1]:
             train_split_idx = 1 - test_split_idx
@@ -49,8 +62,6 @@ def main(cfg: DictConfig):
                 max_new_tokens = 50, do_sample = True, temperature = 0.7,
                 top_p = 0.9, repetition_penalty = 1.1, seed = cfg.seed, 
             )
-            steer_model_kwargs = OmegaConf.to_container(cfg.steer.kwargs, resolve = True)
-                
             model = HuggingFaceLM(
                 cfg.model, cfg.steer.type,
                 default_generation_config = default_generation_config,
@@ -88,13 +99,13 @@ def main(cfg: DictConfig):
                     {
                         "prompt": prompt, 
                         "output": output,    
-                        "generator": f"{cfg.model}-{cfg.steer.name}",
+                        "generator": f"{cfg.model}-{steer_run_name}",
                         "dataset": "TruthfulQA",
                         "T": cfg.steer.T,
                     }
                 ) + "\n")
         
-        print(f"✓ Completed {cfg.model}-{cfg.steer.name} on TruthfulQA")
+        print(f"✓ Completed {cfg.model}-{steer_run_name} on TruthfulQA")
         print(f"  Total responses generated: {len(all_outputs)}")
         print(f"  Configuration: T={cfg.steer.T}")
         print("-" * 120)

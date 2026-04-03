@@ -38,7 +38,8 @@ odesteer/
 ├── src/odesteer/
 │   ├── lm/                   # 语言模型封装与 Hook
 │   │   ├── _config.py
-│   │   └── _huggingface_lm.py
+│   │   ├── _huggingface_lm.py
+│   │   └── _hub_local.py     # Hub 缓存路径、repo id → 本地 snapshot、hf_pretrained_hub_kwargs
 │   ├── steer/                # 各类 Steer 实现（核心）
 │   │   ├── _base_steer.py
 │   │   ├── _ode_steer.py     # 多步 ODE
@@ -47,7 +48,8 @@ odesteer/
 │   │   └── __init__.py       # get_steer_model()
 │   └── utils/
 │       ├── data.py           # 加载 TQA/UltraFeedback/Toxicity 数据
-│       ├── metric.py
+│       ├── env.py            # load_project_dotenv：加载项目根 .env
+│       ├── metric.py         # 评估指标、Judge、Perspective、Quality（含 HF 加载）
 │       └── kernels/          # 特征映射与分类器
 │           ├── _poly_cnt_sketch.py  # 多项式计数草图 φ 与 J_φ
 │           ├── _kernel_clf.py      # 核分类器（sklearn LR + w,b）
@@ -202,12 +204,39 @@ odesteer/
 | `utils/kernels/_kernel_clf.py` | LR 拟合、coef/intercept/dre_coeff、grad/log_dre | `_ode_steer` / `_step_ode_steer` 的 `self.clf` |
 | `utils/kernels/_rff.py` | RFF 核与 jacobian/vjp（消融用） | RFFClassifier / RFFODESteer |
 | `utils/data.py` | 加载 TQA/UF/毒性 激活与题目 | 各脚本的 load_*、DataLoader |
-| `lm/_huggingface_lm.py` | 模型加载、生成、激活提取、steer hook 注册 | 各 scripts 的 generate/chat/eval |
+| `lm/_huggingface_lm.py` | 模型加载、生成、激活提取、steer hook 注册；导入前 `load_project_dotenv` + 默认 `HF_ENDPOINT`；`get_hub_cache_dir_str` 作 `cache_dir` | 各 scripts 的 generate/chat/eval |
+| `lm/_hub_local.py` | `get_hub_cache_dir_str`、`maybe_resolve_pretrained_to_local_path`、`resolve_hub_snapshot_dir`、`hf_pretrained_hub_kwargs`（`local_files_only`、离线） | `_huggingface_lm`、`metric.py`、`ultrafeedback_eval.py` |
+| `utils/env.py` | `load_project_dotenv`：解析项目根 `.env` 键值到 `os.environ` | `_huggingface_lm`、`_hub_local`、`metric.ToxicityEvaluator` |
 | `data/*/extract_activations.py` | 从模型提取指定层、最后一词激活并保存 | 命令行/流水线预处理 |
 
 ---
 
-## 五、后续“爆改”可着力的点
+## 五、环境与 Hugging Face Hub（本仓库增补）
+
+本节描述与**论文算法无关**、但影响**可复现部署与离线运行**的工程层逻辑。
+
+### 5.1 项目根 `.env` 与 `load_project_dotenv`
+
+- **文件**：`src/odesteer/utils/env.py` 中 **`load_project_dotenv(project_dir, override=False)`**。  
+- **行为**：读取 `<project_dir>/.env`，将 `KEY=value` 写入 `os.environ`；`override=False` 时不覆盖已存在的环境变量。  
+- **调用点**：`hf_pretrained_hub_kwargs` 内；`_huggingface_lm.py` 模块顶层（在 `import transformers` 之前）；`ToxicityEvaluator.__init__` 中再次确保加载；**`scripts/ultrafeedback/ultrafeedback_eval.py`** 在 **import transformers 之前**显式调用，与 LM 一致，避免 RM 加载时未读到 `HF_HOME`。
+
+### 5.2 `get_hub_cache_dir_str` 与本地 snapshot 解析
+
+- **文件**：`src/odesteer/lm/_hub_local.py`。  
+- **`get_hub_cache_dir_str()`**：返回 Hugging Face **`hub` 根目录**（其下为 `models--org--repo`）。优先级：`HF_HUB_CACHE` → `HF_HOME/hub` → 若均未设置，则探测 **`/root/autodl-tmp/.cache/huggingface/hub`**、**`~/.cache/huggingface/hub`**（目录存在即用）。  
+- **`maybe_resolve_pretrained_to_local_path(repo_id, hub_cache)`**：在 `hub_cache` 下将 **`Skywork/xxx`** 等形式解析为 **`snapshots/<revision>`** 目录（含 `config.json` 与完整权重检查 `snapshot_has_complete_weights`）；失败则仍返回原 repo id。  
+- **`hf_pretrained_hub_kwargs(model_id)`**：合并上述逻辑，返回 `(pretrained_path_or_id, {local_files_only, cache_dir})`；若已解析到本地目录或设置了 `HF_HUB_OFFLINE` / `ODESteer_OFFLINE` / `ODESteer_LOCAL_ONLY`，则 **`local_files_only=True`**，避免无网环境下去连 `huggingface.co`。
+
+### 5.3 与评估脚本的差异（Ultrafeedback RM）
+
+- **TruthfulQA / Toxicity 评估**：主要依赖 `metric.py` 中的 Judge、GPT2-XL、Perspective 等，均通过 **`hf_pretrained_hub_kwargs`** 或等价的缓存逻辑加载。  
+- **Ultrafeedback 评估**：额外加载 **序列分类 RM**（默认 Skywork reward）。必须在 **Hub 缓存中有该模型** 或传入 **`-r` 本地路径**；仅下载了主模型而未下载 RM 时，会出现“本地无缓存且无法联网”类错误。  
+- **调试**：设置环境变量 **`ODESteer_DEBUG_HUB=1`** 可打印 repo id → 本地 snapshot 的解析结果（`_hub_local` 内）。
+
+---
+
+## 六、后续“爆改”可着力的点
 
 1. **数据预处理**：若希望**在存储前**就做 \(L_2\) 归一化，可在 `extract_*_activations` 或 `data.py` 的 load 后对激活做 `x / (x.norm(dim=-1, keepdim=True) + eps)`；当前设计是“在 \(\phi\) 入口做”，便于与未归一化数据兼容。  
 2. **\(\phi\) 与 \(J_\phi\)**：  
@@ -219,15 +248,18 @@ odesteer/
 4. **ODE 求解**：  
    - 步长/步数：改 `steps`、`T` 或 `options['step_size']`；  
    - 求解器：`solver: midpoint` 或 `rk4`；  
-   - 若不用 torchdiffeq：可自行在 `steer()` 里写 for 循环，每步 `state = state + step_size * vector_field(state)`（欧拉），与论文完全一致。
+   - 若不用 torchdiffeq：可自行在 `steer()` 里写 for 循环，每步 `state = state + step_size * vector_field(state)`（欧拉），与论文完全一致。  
+5. **\(T\) 取值**：论文 **Table 5** 按 backbone 给出 ODESteer 的 \(T\) 区间；与 `confs/steer/ODESteer.yaml` 默认 `T: 1.0` 不同，复现时应用命令行 **`steer.T=...`** 覆盖（见 `README.md`）。  
+6. **Hub 与部署**：若默认探测路径不包含你的数据盘，请在 `.env` 中设置 **`HF_HOME`** 或 **`HF_HUB_CACHE`**；新增机房路径可改 **`get_hub_cache_dir_str`** 中的 `candidate` 列表。
 
 ---
 
-## 六、总结
+## 七、总结
 
 - **L2 归一化**：在 **`NormedPolyCntSketch._normalize`** 中完成，作为 \(\phi\) 的前置步骤，而非单独数据预处理脚本。  
 - **\(\phi(a)\) 与 \(J_\phi(a)\)**：**`_poly_cnt_sketch.py`** 的 `forward`（及 Normed 包装）与 `grad`/`vjp`，对应论文的多项式计数草图与前向/雅可比/VJP。  
 - **\(w\) 与 \(b\)**：**`_kernel_clf.py`** 的 sklearn 逻辑回归 + `coef`/`intercept` + `dre_coeff = N_-/N_+`，\(h(a)\) = `log_dre`，\(\nabla_a h\) 方向 = `grad`（再在 steer 中 L2 归一化）。  
-- **ODE 多步循环**：**`_ode_steer.py`** 的 **`vector_field`**（梯度 + L2 归一化） + **`torchdiffeq.odeint`**（步长循环）；单步版在 **`_step_ode_steer.py`** 的 `X + T * vector_field(X)`。
+- **ODE 多步循环**：**`_ode_steer.py`** 的 **`vector_field`**（梯度 + L2 归一化） + **`torchdiffeq.odeint`**（步长循环）；单步版在 **`_step_ode_steer.py`** 的 `X + T * vector_field(X)`。  
+- **工程层（增补）**：**`_hub_local.py`** 负责本地 Hub 解析与 **`hf_pretrained_hub_kwargs`**；**`env.py`** 负责 **`.env`**；评估与 LM 加载依赖二者以实现镜像、数据盘缓存与离线 **`local_files_only`**。
 
 按上述映射即可在对应文件中进行针对性修改与扩展。
