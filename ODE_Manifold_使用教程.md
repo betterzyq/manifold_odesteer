@@ -75,7 +75,7 @@ V_k = V_h[:k]^\top \in \mathbb{R}^{d \times k}
 
 默认输出路径：
 
-`data/<task>/activations/<model>/manifold_Vk_layer<L>.pt`
+`data/<task>/activations/<model>/manifold_Vk_layer<L>_k<K>.pt`
 
 ### 4.1 命令行参数说明
 
@@ -131,7 +131,7 @@ uv run python data/extract_manifold.py \
 
 ### 4.3 输出文件格式
 
-- 默认可用 `torch.load` 读入为 **`FloatTensor`，形状 `[d, k]`**。
+- 默认可用 `torch.load` 读入为 **`FloatTensor`，形状 `[d, k]`**，默认文件名为 `manifold_Vk_layer<L>_k<K>.pt`，不同 `k` 不会互相覆盖。
 - 若你保存的是字典且含键 **`V_k`**，生成端合并 CLI 时也会自动解包（见 `manifold_cli.py`）。
 
 若请求的 `k` 大于 `min(N, d)`，脚本会自动将有效列数降为 `k_eff` 并在终端打印警告。
@@ -186,7 +186,7 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
   steer.T=5.0 \
   steer.kwargs.use_manifold=true \
   steer.kwargs.use_manifold_retraction=true \
-  steer.kwargs.vk_path=/绝对路径/odesteer/data/truthfulqa/activations/Llama3.1-8B-Base/manifold_Vk_layer13.pt \
+  steer.kwargs.vk_path=/绝对路径/odesteer/data/truthfulqa/activations/Llama3.1-8B-Base/manifold_Vk_layer13_k128.pt \
   steer.kwargs.manifold_dim=128
 ```
 
@@ -203,7 +203,7 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
   steer=StepODESteer \
   steer.T=1.0 \
   steer.kwargs.use_manifold=true \
-  steer.kwargs.vk_path=/path/to/manifold_Vk_layer13.pt
+  steer.kwargs.vk_path=/path/to/manifold_Vk_layer13_k128.pt
 ```
 
 ### 5.3 方式二：流形相关 CLI（与 Hydra 混用）
@@ -222,7 +222,7 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
 ```bash
 uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
   --use_manifold \
-  --vk_path /path/to/manifold_Vk_layer13.pt \
+  --vk_path /path/to/manifold_Vk_layer13_k128.pt \
   --manifold_dim 128 \
   model=Llama3.1-8B-Base \
   layer_idx=13 \
@@ -236,7 +236,7 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
 uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
   --use_manifold \
   --use_manifold_retraction \
-  --vk_path /path/to/manifold_Vk_layer13.pt \
+  --vk_path /path/to/manifold_Vk_layer13_k128.pt \
   --manifold_dim 128 \
   model=Llama3.1-8B-Base \
   layer_idx=13 \
@@ -270,7 +270,82 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
 
 ---
 
-## 7. 常见问题与排查
+## 7. 超参数敏感度分析（k 维度）
+
+目标：固定 `T`、`layer_idx`、`steer=ODESteer`，分析流形子空间维度 `k` 对 TruthfulQA 指标 **True × Info** 与 **Perplexity** 的影响。
+
+### 7.1 一键脚本（推荐）
+
+已提供驱动脚本：
+
+`scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py`
+
+默认配置：
+
+- `model=Llama3.1-8B-Base`
+- `layer=13`
+- `steer.T=5.0`
+- `seed=42`
+- `k ∈ {16, 32, 64, 128, 256, 512, 1024, 4096}`
+- `use_manifold=true` + `use_manifold_retraction=true`
+
+执行（仓库根目录）：
+
+```bash
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py
+```
+
+该命令按顺序完成：
+
+1. 提取每个 `k` 的 `V_k`（若 `manifold_Vk_layer<L>_k<K>.pt` 已存在则跳过）。
+2. 对每个 `k` 运行 `truthfulqa_generate.py`（若对应 raw jsonl 已存在则跳过）。
+3. 运行 `truthfulqa_eval.py` 汇总评估。
+4. 读取评估 CSV 并画双轴图：
+   - 左轴：`True * Info`（柱状）
+   - 右轴：`Perplexity`（虚线）
+
+### 7.2 只绘图 / 分步执行
+
+只基于现有评估结果绘图：
+
+```bash
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py --plot-only
+```
+
+仅跳过某阶段：
+
+```bash
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py --skip-extract
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py --skip-generate
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py --skip-eval
+```
+
+自定义参数示例：
+
+```bash
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py \
+  --model Llama3.1-8B-Base \
+  --layer 13 \
+  --steer-T 5.0 \
+  --seed 42 \
+  --ks 16,32,64,128,256,512,1024,4096
+```
+
+### 7.3 输出位置
+
+- `V_k`：`data/truthfulqa/activations/<model>/manifold_Vk_layer<L>_k<K>.pt`
+- raw 生成：`results/truthfulqa/raw_outputs/<model>/*.jsonl`
+- 评估 CSV：`results/truthfulqa/eval_results/stat_results/<model>-l<L>-TruthfulQA-seed<S>.csv`
+- 敏感度图：`results/truthfulqa/sensitivity/manifold_k_odesteer_T<T>_l<L>_seed<S>.png`
+
+### 7.4 说明
+
+- `k=4096` 表示“请求全维”；实际仍受 SVD 有效秩 `r=min(N,d)` 限制，脚本会自动使用 `k_eff=min(k,r)`。
+- 绘图时默认只统计 **多步 ODESteer + Manifold-k{k}（含 retraction）**，并排除 `-proj` 与 `CLF` 变体，避免混入非本实验条件。
+
+---
+
+## 8. 常见问题与排查
 
 **Q：`extract_manifold.py` 报找不到 `*activations_layer{L}.pt`**  
 A：确认 `--task` / `--activations_dir` 与 `-m`、`-l` 是否正确；并确认已运行对应任务的 `extract_activations`。
@@ -292,11 +367,12 @@ A：当前实现中投影仅在 `self.V_k is not None` 时启用。若只配置 
 
 ---
 
-## 8. 相关源码文件（便于二次开发）
+## 9. 相关源码文件（便于二次开发）
 
 | 文件 | 作用 |
 |------|------|
-| `data/extract_manifold.py` | 离线 SVD，写出 `manifold_Vk_layer{L}.pt` |
+| `data/extract_manifold.py` | 离线 SVD，写出 `manifold_Vk_layer{L}_k{K}.pt` |
+| `scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py` | k 维度敏感度全流程（extract / generate / eval / plot） |
 | `src/odesteer/steer/_manifold.py` | 投影、收回、`V_k` 截断与从路径加载 |
 | `src/odesteer/steer/_ode_steer.py` | 多步 `odeint` + 流形逻辑 |
 | `src/odesteer/steer/_step_ode_steer.py` | 单步欧拉 + 流形逻辑 |
@@ -306,7 +382,7 @@ A：当前实现中投影仅在 `self.V_k is not None` 时启用。若只配置 
 
 ---
 
-## 9. 引用
+## 10. 引用
 
 若你在论文或报告中同时引用 ODESteer 与本扩展，请至少包含原仓库给出的 **ODESteer BibTeX**（见 [README.md](README.md) 的 Citation 一节），并在正文中说明 ODE-Manifold 为基于该实现的推理期流形扩展。
 

@@ -68,7 +68,7 @@ def main() -> None:
         "--output",
         type=str,
         default=None,
-        help="Output .pt path (default: <activations_dir>/manifold_Vk_layer{L}.pt)",
+        help="Output .pt path (default: <activations_dir>/manifold_Vk_layer{L}_k{K}.pt)",
     )
     parser.add_argument(
         "--activations_dir",
@@ -97,7 +97,7 @@ def main() -> None:
     out_path = (
         Path(args.output).resolve()
         if args.output
-        else activations_dir / f"manifold_Vk_layer{args.layer_idx}.pt"
+        else activations_dir / f"manifold_Vk_layer{args.layer_idx}_k{args.manifold_dim}.pt"
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(Vk, out_path)

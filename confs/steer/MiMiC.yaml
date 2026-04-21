@@ -1,4 +1,6 @@
 type: MiMiC
-kwargs: {}
+kwargs:
+  # 默认 1e-2 与旧版一致；仅当某模型 OT 出现 NaN 时会在代码内自动尝试更大 reg，也可在此手动加大 ot_reg
+  ot_reg: 1.0e-2
 T: 1.0
 name: ${steer.type}-T${steer.T}
