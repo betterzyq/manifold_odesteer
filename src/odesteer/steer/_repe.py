@@ -14,8 +14,8 @@ from ._base_steer import VecSteer
 
 
 class RepE(VecSteer):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.pca = PCA(n_components = 1)
     
     @torch.no_grad()

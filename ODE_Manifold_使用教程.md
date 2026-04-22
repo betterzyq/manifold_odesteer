@@ -1,6 +1,7 @@
 # ODE-Manifold 使用教程
 
-本教程说明如何在 ODESteer 代码库中使用 **ODE-Manifold**（基于流形边界势垒的常微分方程引导）：在固定低秩子空间上对向量场做**切空间投影**，并在每步（或积分结束后）用**保范数收回（Retraction）**稳定隐状态范数，减轻大幅干预导致的困惑度飙升或生成异常。
+本教程说明如何在 ODESteer 代码库中使用 **ODE-Manifold**（基于流形边界势垒的常微分方程引导）：在固定低秩子空间上对向量场做**切空间投影**，并在每步（或积分结束后）用**保范数收回（Retraction）**稳定隐状态范数，减轻大幅干预导致的困惑度飙升或生成异常。  
+当前版本中，这套逻辑已可通用于多数 steer（不仅是 ODESteer / StepODESteer）。
 
 > 前置条件与安装、HF 镜像与缓存、离线加载等通用说明见仓库根目录 **[README.md](README.md)**。本教程默认你已完成 `uv sync`，且已按 README 准备好模型与数据。
 
@@ -8,7 +9,13 @@
 
 ## 1. 方法在代码里做什么
 
-ODE-Manifold 在 **`ODESteer`** / **`StepODESteer`** 上叠加两层操作（实现见 `src/odesteer/steer/_ode_steer.py`、`src/odesteer/steer/_step_ode_steer.py` 与 `src/odesteer/steer/_manifold.py`）：
+ODE-Manifold 目前通过基类后处理接入，已覆盖：
+
+- `ODESteer` / `StepODESteer`
+- `CAA` / `RepE` / `ITI`
+- `LinAcT` / `MiMiC`
+
+实现入口见 `src/odesteer/steer/_base_steer.py` 与 `src/odesteer/steer/_manifold.py`（ODE 两类仍保留原有路径）。
 
 1. **切空间投影**  
    先按原 ODESteer 计算归一化梯度方向 `vf`（与论文一致），若提供了正交基矩阵 `V_k ∈ ℝ^{d×k}`，则替换为：
@@ -23,7 +30,7 @@ ODE-Manifold 在 **`ODESteer`** / **`StepODESteer`** 上叠加两层操作（实
    X_{\mathrm{new}} \leftarrow X_{\mathrm{new}} \cdot \frac{\lVert X \rVert_2}{\lVert X_{\mathrm{new}} \rVert_2 + \varepsilon}
    \]
 
-**与原版 ODESteer 的关系**：分类器（多项式计数草图 + 逻辑回归）、障碍函数与 `torchdiffeq.odeint` 的调用方式不变；仅在向量场与输出激活上增加上述两步。
+**与原版 ODESteer 的关系**：分类器（多项式计数草图 + 逻辑回归）、障碍函数与 `torchdiffeq.odeint` 的调用方式不变；仅在向量场与输出激活上增加上述两步。对其他 steer（CAA / RepE / ITI / LinAcT / MiMiC）则是通过统一后处理复用同样的投影与收回逻辑。
 
 ---
 
@@ -34,7 +41,7 @@ ODE-Manifold 在 **`ODESteer`** / **`StepODESteer`** 上叠加两层操作（实
         ↓
 离线 SVD 提取 V_k（extract_manifold.py）
         ↓
-生成脚本 + steer=ODESteer（或 StepODESteer）+ 流形参数
+生成脚本 + 任一支持的 steer + 流形参数
         ↓
 （可选）按原 README 运行对应 eval 脚本
 ```
@@ -138,10 +145,10 @@ uv run python data/extract_manifold.py \
 
 ---
 
-## 5. 阶段 C：生成时启用 ODE-Manifold
+## 5. 阶段 C：生成时启用 ODE-Manifold（通用于多 steer）
 
 支持两种方式：**Hydra 配置**（推荐与实验记录一致）与 **额外命令行标志**（与 Hydra 混用）。  
-底层类为 **`ODESteer`** / **`StepODESteer`**，通过 `steer_model_kwargs` 传入下列字段（定义见 `confs/steer/ODESteer.yaml`、`confs/steer/StepODESteer.yaml`）。
+当前支持的 steer（`ODESteer`、`StepODESteer`、`CAA`、`RepE`、`ITI`、`LinAcT`、`MiMiC`）都可通过 `steer_model_kwargs` 传入相同流形字段。
 
 **重要（Hydra 命令行）**：这些字段在 YAML 里都写在 **`steer.kwargs`** 下面，与 `solver`、`n_components` 同级。因此命令行覆盖时必须写 **`steer.kwargs.use_manifold=true`**，**不能**写 `steer.use_manifold=true`（否则会报 `Key 'use_manifold' is not in struct`）。`steer.T`、`steer.name` 仍在 `steer` 顶层。
 
@@ -159,7 +166,7 @@ uv run python data/extract_manifold.py \
 
 **注意**：仅配置 `vk_path` 而不将 `use_manifold` 设为 `true` 时，**不会**从路径加载 `V_k`，避免误开流形。
 
-**消融对应关系（CLI / Hydra，见 5.3）**：
+**消融对应关系（CLI / Hydra，见 5.3）**（以下以 ODESteer 记号说明，其他 steer 同理）：
 
 1. **Vanilla ODESteer / StepODESteer**：不加流形相关参数。  
 2. **StepODESteer + 投影 + 收回** 或 **ODESteer + 投影 + 收回**：`use_manifold` + `vk_path` + `use_manifold_retraction=true`。  
@@ -204,6 +211,20 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
   steer.T=1.0 \
   steer.kwargs.use_manifold=true \
   steer.kwargs.vk_path=/path/to/manifold_Vk_layer13_k128.pt
+```
+
+**CAA（示例：同样可启用投影+收回）**：
+
+```bash
+uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
+  model=Llama3.1-8B-Base \
+  layer_idx=13 \
+  steer=CAA \
+  steer.T=1.0 \
+  steer.kwargs.use_manifold=true \
+  steer.kwargs.use_manifold_retraction=true \
+  steer.kwargs.vk_path=/path/to/manifold_Vk_layer13_k128.pt \
+  steer.kwargs.manifold_dim=128
 ```
 
 ### 5.3 方式二：流形相关 CLI（与 Hydra 混用）
@@ -362,6 +383,9 @@ A：`V_k` 的行维 `d` 必须与当前模型、当前 `layer_idx` 的隐藏维�
 **Q：`--use_manifold` 写了但 Hydra 报未知参数**  
 A：请确认使用的是已修改过的 `*_generate.py`（仓库中已在 import 后调用 `strip_manifold_flags_from_argv()`）。若你自行复制了旧脚本，需同步该逻辑。
 
+**Q：`steer=CAA`（或 RepE/ITI/LinAcT/MiMiC）时报 `Key 'use_manifold' is not in struct`**  
+A：请确认你使用的是已更新后的 `confs/steer/*.yaml`（这些文件里的 `kwargs` 已包含 `use_manifold`、`use_manifold_retraction`、`vk_path`、`manifold_dim`）。若你本地仍是旧版本，请先同步代码或手动补齐这些键。
+
 **Q：仅想保范数、不想子空间投影**  
 A：当前实现中投影仅在 `self.V_k is not None` 时启用。若只配置 `use_manifold_retraction` 而不提供 `V_k`、且 `use_manifold=false`，可走「仅收回」路径（需自行确认是否满足你的实验设定；默认 YAML 中两者多为 false）。
 
@@ -373,11 +397,12 @@ A：当前实现中投影仅在 `self.V_k is not None` 时启用。若只配置 
 |------|------|
 | `data/extract_manifold.py` | 离线 SVD，写出 `manifold_Vk_layer{L}_k{K}.pt` |
 | `scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py` | k 维度敏感度全流程（extract / generate / eval / plot） |
+| `src/odesteer/steer/_base_steer.py` | 通用流形后处理（向量场投影 / 输出收回） |
 | `src/odesteer/steer/_manifold.py` | 投影、收回、`V_k` 截断与从路径加载 |
 | `src/odesteer/steer/_ode_steer.py` | 多步 `odeint` + 流形逻辑 |
 | `src/odesteer/steer/_step_ode_steer.py` | 单步欧拉 + 流形逻辑 |
 | `src/odesteer/utils/manifold_cli.py` | `--use_manifold` 等与 Hydra 的衔接；`steer_name_with_manifold_suffix` 区分输出文件名 |
-| `confs/steer/ODESteer.yaml`、`StepODESteer.yaml` | 默认流形相关键位 |
+| `confs/steer/*.yaml` | 各 steer 的默认参数；流形键位（`use_manifold` 等）已扩展到多数 steer |
 | `prompt.md` | 方法动机与与 LoRAM / Selective Steering 的类比说明 |
 
 ---

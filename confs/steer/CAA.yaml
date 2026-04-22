@@ -1,4 +1,8 @@
 type: CAA
-kwargs: {}
+kwargs:
+  use_manifold: false
+  use_manifold_retraction: false
+  vk_path: null
+  manifold_dim: 128
 T: 1.0
 name: ${steer.type}-T${steer.T}

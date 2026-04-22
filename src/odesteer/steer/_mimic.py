@@ -23,8 +23,13 @@ def _finite_np(x: np.ndarray) -> np.ndarray:
 
 
 class MiMiC(Steer):
-    def __init__(self, ot_reg: float = 1e-2, ot_reg_schedule: tuple[float, ...] | None = None):
-        super().__init__()
+    def __init__(
+        self,
+        ot_reg: float = 1e-2,
+        ot_reg_schedule: tuple[float, ...] | None = None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
         self.clf = LogisticRegression(max_iter=5000)
         self._ot_reg_default = float(ot_reg)
         # 先尝试与历史实现一致的 reg，仅在数值失败时再增大，避免无故改变 Llama/Mistral/Falcon 上已稳定的 MiMiC 行为
@@ -72,7 +77,10 @@ class MiMiC(Steer):
         y_pred = self.clf.predict(X.detach().cpu().numpy())
         steered_X = X.detach().cpu().numpy().copy()
         steered_X[y_pred == 0] = self.ot_linear.transform(steered_X[y_pred == 0])
-        return torch.as_tensor(steered_X, device = X.device, dtype = X.dtype)
+        X_new = torch.as_tensor(steered_X, device=X.device, dtype=X.dtype)
+        return self._postprocess_steered(X, X_new)
     
     def vector_field(self, X: Tensor):
-        return
+        X_new = self.steer(X, T=1.0)
+        vf = X_new - X
+        return self._postprocess_vector_field(vf)

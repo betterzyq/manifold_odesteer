@@ -34,8 +34,8 @@ class LinOT(nn.Module):
     
     
 class LinAcT(Steer):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.lin_ot = LinOT()
         
     def fit(self, pos_X: Tensor, neg_X: Tensor):
@@ -44,8 +44,10 @@ class LinAcT(Steer):
     
     def steer(self, X: Tensor, T: float = 1.0):
         self.lin_ot.to(X.device)
-        return self.lin_ot(X)
+        X_new = self.lin_ot(X)
+        return self._postprocess_steered(X, X_new)
     
     def vector_field(self, X: Tensor):
         self.lin_ot.to(X.device)
-        return self.lin_ot(X) - X
+        vf = self.lin_ot(X) - X
+        return self._postprocess_vector_field(vf)

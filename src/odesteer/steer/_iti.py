@@ -15,8 +15,8 @@ from ._base_steer import VecSteer
         
 
 class ITI(VecSteer):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.clf = LogisticRegression(max_iter = 1000)
     
     @torch.no_grad()
