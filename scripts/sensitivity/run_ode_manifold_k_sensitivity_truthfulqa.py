@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-ODE-Manifold 子空间维度 k 的超参数敏感度（TruthfulQA + ODESteer + Llama3.1-8B-Base 默认）。
+ODE-Manifold 子空间维度 k 的超参数敏感度（TruthfulQA + CRFDSteer + Llama3.1-8B-Base 默认）。
 
 流程：
   1) 对每个 k 调用 data/extract_manifold.py（若对应 .pt 已存在则跳过）
   2) 对每个 k 调用 scripts/truthfulqa/truthfulqa_generate.py（若目标 jsonl 已存在则跳过）
   3) 调用 scripts/truthfulqa/truthfulqa_eval.py 汇总评估
-  4) 从 eval CSV 读取 ODESteer+Manifold 各行，绘制 True×Info（左轴）与 PPL（右轴）
+  4) 从 eval CSV 读取 CRFDSteer+Manifold 各行（兼容旧 CSV 中的 ODESteer 前缀），绘制 True×Info（左轴）与 PPL（右轴）
 
 用法（在仓库根目录）：
   uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py
@@ -40,12 +40,12 @@ def expected_raw_jsonl(
     """匹配已生成的 raw jsonl（steer_run_name 中含 ``-Manifold-k{k}-``）。"""
     out_dir = project_dir / "results" / "truthfulqa" / "raw_outputs" / model
     if not out_dir.is_dir():
-        return out_dir / f"{model}-l{layer}-ODESteer-Manifold-k{k}-TruthfulQA-seed{seed}.jsonl"
+        return out_dir / f"{model}-l{layer}-CRFDSteer-Manifold-k{k}-TruthfulQA-seed{seed}.jsonl"
     pat = f"*-Manifold-k{k}-TruthfulQA-seed{seed}.jsonl"
     matches = sorted(out_dir.glob(pat))
     if matches:
         return matches[0]
-    return out_dir / f"{model}-l{layer}-ODESteer-Manifold-k{k}-TruthfulQA-seed{seed}.jsonl"
+    return out_dir / f"{model}-l{layer}-CRFDSteer-Manifold-k{k}-TruthfulQA-seed{seed}.jsonl"
 
 
 def vk_path_for_k(project_dir: Path, model: str, layer: int, k: int) -> Path:
@@ -120,7 +120,7 @@ def step_generate(
         "scripts/truthfulqa/truthfulqa_generate.py",
         f"model={model}",
         f"layer_idx={layer}",
-        "steer=ODESteer",
+        "steer=CRFDSteer",
         f"steer.T={steer_T}",
         "steer.kwargs.use_manifold=true",
         "steer.kwargs.use_manifold_retraction=true",
@@ -169,9 +169,9 @@ def load_manifold_k_rows(
     model_key = f"{model}-l{layer}"
     sub = df[df["Model"] == model_key].copy()
     sm = sub["Steering Method"].astype(str)
-    # 仅多步 ODESteer + 流形（带 IRR），排除 CLF 融合、仅投影 -proj、StepODESteer
+    # 仅多步 CRFDSteer（或旧 CSV 中的 ODESteer）+ 流形（带 IRR），排除 CLF 融合、仅投影 -proj、Step*
     sub = sub[
-        sm.str.startswith("ODESteer", na=False)
+        (sm.str.startswith("CRFDSteer", na=False) | sm.str.startswith("ODESteer", na=False))
         & sm.str.contains("Manifold-k", na=False)
         & ~sm.str.contains("CLF", na=False)
         & ~sm.str.contains("-proj", na=False)
@@ -203,7 +203,7 @@ def plot_sensitivity(
     sub = load_manifold_k_rows(project_dir, model, layer, seed)
     if sub.empty:
         raise RuntimeError(
-            "No ODESteer+Manifold-k rows in eval CSV. Run eval after all generations."
+            "No CRFDSteer/ODESteer + Manifold-k rows in eval CSV. Run eval after all generations."
         )
 
     x = sub["_k"].astype(int).tolist()
@@ -244,7 +244,7 @@ def plot_sensitivity(
     ax2.tick_params(axis="y", labelcolor=color_ppl)
 
     fig.suptitle(
-        f"{model} | TruthfulQA | ODESteer + Manifold | layer={layer}, T={steer_T}, seed={seed}"
+        f"{model} | TruthfulQA | CRFDSteer + Manifold | layer={layer}, T={steer_T}, seed={seed}"
     )
 
     lines1, lab1 = ax1.get_legend_handles_labels()
@@ -264,7 +264,7 @@ def plot_sensitivity(
         / "results"
         / "truthfulqa"
         / "sensitivity"
-        / f"manifold_k_odesteer_T{steer_T}_l{layer}_seed{seed}.png"
+        / f"manifold_k_crfdsteer_T{steer_T}_l{layer}_seed{seed}.png"
     )
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=200, bbox_inches="tight")
@@ -279,7 +279,7 @@ def parse_ks(s: str) -> list[int]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="ODE-Manifold k sweep for TruthfulQA + ODESteer (extract → generate → eval → plot)"
+        description="ODE-Manifold k sweep for TruthfulQA + CRFDSteer (extract → generate → eval → plot)"
     )
     parser.add_argument("--model", type=str, default="Llama3.1-8B-Base")
     parser.add_argument("--layer", type=int, default=13)

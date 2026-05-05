@@ -170,13 +170,15 @@ class MetricTracker:
 class TruthfulQAJudge:
     def __init__(self, display: bool = False):
         # 与 ModelScope / HF repo id 一致；也可通过环境变量覆盖
-        true_judge_name = os.environ.get(
-            "ODESteer_TRUTHFULQA_TRUTH_JUDGE",
-            "allenai/truthfulqa-truth-judge-llama2-7B",
+        true_judge_name = (
+            os.environ.get("CRFDSteer_TRUTHFULQA_TRUTH_JUDGE")
+            or os.environ.get("ODESteer_TRUTHFULQA_TRUTH_JUDGE")
+            or "allenai/truthfulqa-truth-judge-llama2-7B"
         )
-        info_judge_name = os.environ.get(
-            "ODESteer_TRUTHFULQA_INFO_JUDGE",
-            "allenai/truthfulqa-info-judge-llama2-7B",
+        info_judge_name = (
+            os.environ.get("CRFDSteer_TRUTHFULQA_INFO_JUDGE")
+            or os.environ.get("ODESteer_TRUTHFULQA_INFO_JUDGE")
+            or "allenai/truthfulqa-info-judge-llama2-7B"
         )
         self.true_judge, self.true_tokenizer = _load_causal_lm_and_tokenizer(
             true_judge_name, device_map="auto"
@@ -313,9 +315,10 @@ class QualityEvaluator:
     ):
         # 默认与 ModelScope 一致：openai-community/gpt2-xl -> hub/models--openai-community--gpt2-xl
         if model_name is None:
-            model_name = os.environ.get(
-                "ODESteer_QUALITY_MODEL",
-                "openai-community/gpt2-xl",
+            model_name = (
+                os.environ.get("CRFDSteer_QUALITY_MODEL")
+                or os.environ.get("ODESteer_QUALITY_MODEL")
+                or "openai-community/gpt2-xl"
             )
         resolved, kw = hf_pretrained_hub_kwargs(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(

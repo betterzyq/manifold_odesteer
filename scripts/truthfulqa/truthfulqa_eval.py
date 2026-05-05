@@ -23,9 +23,16 @@ truthfulqa_df_cols = [
 
 steer_methods = [
     "NoSteer", "RepE", "ITI",  "CAA", "MiMiC", "LinAcT",
-    "ODESteer"
+    "CRFDSteer",
+    "StepCRFDSteer",
 ]
 steer_order_map = {val: i for i, val in enumerate(steer_methods)}
+steer_order_map["ODESteer"] = steer_order_map["CRFDSteer"]
+steer_order_map["StepODESteer"] = steer_order_map["StepCRFDSteer"]
+steer_order_map["RFFODESteer"] = steer_order_map["CRFDSteer"]
+steer_order_map["RFFCRFDSteer"] = steer_order_map["CRFDSteer"]
+steer_order_map["RFFStepODESteer"] = steer_order_map["StepCRFDSteer"]
+steer_order_map["RFFStepCRFDSteer"] = steer_order_map["StepCRFDSteer"]
 
 
 def get_steer_sort_key(value):

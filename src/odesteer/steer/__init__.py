@@ -10,15 +10,32 @@ from ._iti import ITI
 from ._mimic import MiMiC
 from ._lin_act import LinAcT
 
-# ODESteer
-from ._ode_steer import BaseODESteer, ODESteer, RFFODESteer
-from ._step_ode_steer import BaseStepODESteer, StepODESteer, RFFStepODESteer    
+# CRFDSteer (legacy aliases: ODESteer / StepODESteer / RFF*)
+from ._ode_steer import (
+    BaseCRFDSteer,
+    CRFDSteer,
+    RFFCRFDSteer,
+    BaseODESteer,
+    ODESteer,
+    RFFODESteer,
+)
+from ._step_ode_steer import (
+    BaseStepCRFDSteer,
+    StepCRFDSteer,
+    RFFStepCRFDSteer,
+    BaseStepODESteer,
+    StepODESteer,
+    RFFStepODESteer,
+)
 
 __all__ = [
     'Steer', 'VecSteer', 
     # Baselines
     'RepE', 'CAA', 'ITI', 'MiMiC', 'LinAcT',
-    # ODESteer
+    # CRFDSteer (primary)
+    'BaseCRFDSteer', 'CRFDSteer', 'RFFCRFDSteer',
+    'BaseStepCRFDSteer', 'StepCRFDSteer', 'RFFStepCRFDSteer',
+    # Legacy (ODESteer names)
     'BaseODESteer', 'ODESteer', 'RFFODESteer',
     'BaseStepODESteer', 'StepODESteer', 'RFFStepODESteer',
 ]

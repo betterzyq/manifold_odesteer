@@ -1,8 +1,8 @@
-# ODESteer: A Unified ODE-Based Steering Framework for LLM Alignment
+# CRFDSteer (本仓库对 odesteer / ODESteer 的扩展与重命名)
 
-Official implementation of the paper **"ODESteer: A Unified ODE-Based Steering Framework for LLM Alignment"** (ICLR 2026)
+本仓库在 [ODESteer](https://openreview.net/forum?id=CFewUmgIIL) 官方实现之上开展实验扩展（如 **ODE-Manifold**）；论文中的主 steer 方法命名为 **CRFDSteer**，对应 Hydra：`steer=CRFDSteer`，亦保留 `steer=ODESteer` 作为别名。
 
-This repository provides code for ODESteer, a novel activation steering approach based on ordinary differential equations and barrier functions from control theory.
+上游论文：**"ODESteer: A Unified ODE-Based Steering Framework for LLM Alignment"** (ICLR 2026)。核心思路仍基于常微分方程与障碍函数定义的向量场激活引导。
 
 [Paper](https://openreview.net/forum?id=CFewUmgIIL), [Website](https://odesteer.github.io/)
 
@@ -74,26 +74,26 @@ This repository provides code for ODESteer, a novel activation steering approach
 
 - **`HF_HUB_CACHE`** 或 **`HF_HOME/hub`**：指定模型缓存的 `hub` 根目录（`models--org--repo` 所在层）。
 - 若**未**设置上述变量，会依次尝试探测常见路径：`/root/autodl-tmp/.cache/huggingface/hub`、`~/.cache/huggingface/hub`（目录存在则使用），便于数据盘部署而无需手写 `.env`。
-- 若已成功解析到带 `config.json` 的本地 snapshot，或设置 **`HF_HUB_OFFLINE=1`** / **`ODESteer_OFFLINE=1`** / **`ODESteer_LOCAL_ONLY=1`**，则 **`local_files_only=True`**，避免再访问 Hub。
+- 若已成功解析到带 `config.json` 的本地 snapshot，或设置 **`HF_HUB_OFFLINE=1`** / **`CRFDSteer_OFFLINE=1`**（或与旧脚本兼容的 **`ODESteer_OFFLINE=1`**） / **`CRFDSteer_LOCAL_ONLY=1`**（或 **`ODESteer_LOCAL_ONLY=1`**），则 **`local_files_only=True`**，避免再访问 Hub。
 - **`HF_ENDPOINT`**（如 `https://hf-mirror.com`）须在 **`import transformers` 之前**写入环境变量；`_huggingface_lm.py` 与 **`ultrafeedback_eval.py`** 会在导入前加载项目根 `.env` 并设置默认镜像（未配置时）。
 
 ## ODE-Manifold（流形扩展）
 
-在标准 ODESteer 上增加**切空间投影**与**保范数收回**的推理期扩展，详细步骤、CLI 与 Hydra 配置见 **[ODE_Manifold_使用教程.md](ODE_Manifold_使用教程.md)**。
+在标准 **CRFDSteer** 上增加**切空间投影**与**保范数收回**的推理期扩展，详细步骤、CLI 与 Hydra 配置见 **[ODE_Manifold_使用教程.md](ODE_Manifold_使用教程.md)**。
 
 ## Quick Start
 
-Here's a minimal example to run ODESteer on TruthfulQA with Llama-3.1-8B:
+Here's a minimal example to run CRFDSteer on TruthfulQA with Llama-3.1-8B:
 
 ```bash
 # 1. Prepare data
 uv run bash data/truthfulqa.sh
 
-# 2. Generate responses with ODESteer
+# 2. Generate responses with CRFDSteer（亦可用 steer=ODESteer 别名）
 uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
     model=Llama3.1-8B-Base \
     layer_idx=13 \
-    steer=ODESteer \
+    steer=CRFDSteer \
     steer.T=5.0
 
 # 3. Evaluate results
@@ -123,7 +123,7 @@ When Hugging Face is unreachable (e.g. `Network is unreachable`):
    export HF_HUB_OFFLINE=1
    uv run bash data/truthfulqa.sh
    ```
-   Or: `export ODESteer_OFFLINE=1` (same effect).
+   Or: `export CRFDSteer_OFFLINE=1` (or legacy `ODESteer_OFFLINE=1`, same effect).
 
 2. **Use a local model path** instead of downloading: pass the path to the model directory with `-m` when running scripts (e.g. `-m /path/to/Llama-3.1-8B`). The dataset still needs to be in cache or loaded once with network.
 
@@ -165,7 +165,7 @@ The command will automatically evaluate all steering methods with the specific m
 
 **重新生成与重新评估**：`ultrafeedback_generate.py` 在对应 **`raw_outputs/...jsonl` 已存在时会直接跳过**；`ultrafeedback_eval.py` 若统计 CSV 中已有同一 **Steering Method** 行也会跳过。需重跑时请删除（或改名）旧 **jsonl** 及 CSV 中对应行后再执行。
 
-**Example - Compare ODESteer with baseline methods**:
+**Example - Compare CRFDSteer with baseline methods**:
 ```bash
 # No steering (baseline)
 uv run python -u scripts/ultrafeedback/ultrafeedback_generate.py \
@@ -175,9 +175,9 @@ uv run python -u scripts/ultrafeedback/ultrafeedback_generate.py \
 uv run python -u scripts/ultrafeedback/ultrafeedback_generate.py \
     model=Llama3.1-8B-Base layer_idx=13 steer=CAA steer.T=1.0
 
-# ODESteer (our method)
+# CRFDSteer (our method)
 uv run python -u scripts/ultrafeedback/ultrafeedback_generate.py \
-    model=Llama3.1-8B-Base layer_idx=13 steer=ODESteer steer.T=5.0
+    model=Llama3.1-8B-Base layer_idx=13 steer=CRFDSteer steer.T=5.0
 
 # Evaluate
 uv run python -u scripts/ultrafeedback/ultrafeedback_eval.py -m Llama3.1-8B-Base -l 13 -d
@@ -216,6 +216,36 @@ uv run python -u scripts/toxicity/detox_generate.py \
 uv run python -u scripts/toxicity/detox_eval.py -m <MODEL> -l <LAYER> -d
 ```
 
+### ODE-Manifold k 敏感度分析入口
+
+已提供三个一键脚本（extract → generate → eval → plot）：
+
+- `scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py`
+- `scripts/sensitivity/run_ode_manifold_k_sensitivity_ultrafeedback.py`
+- `scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py`
+
+示例命令：
+
+```bash
+# TruthfulQA
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py
+
+# Ultrafeedback（可选指定 reward model）
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_ultrafeedback.py \
+    --reward-model Skywork/Skywork-Reward-V2-Llama-3.1-8B
+
+# RealToxicityPrompts
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py
+```
+
+仅重绘图（不重新抽取/生成/评估）：
+
+```bash
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py --plot-only
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_ultrafeedback.py --plot-only
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py --plot-only
+```
+
 
 ## Supported Models and Methods
 
@@ -230,9 +260,9 @@ uv run python -u scripts/toxicity/detox_eval.py -m <MODEL> -l <LAYER> -d
 
 **Note:** The steering layer indices reported in our paper differ slightly from those used here, as this implementation starts counting from zero.
 
-### ODESteer: range of \(T\) (paper Table 5)
+### CRFDSteer: range of \(T\) (paper Table 5)
 
-复现实验时，**ODESteer** 的 **`steer.T`** 建议在论文 **Table 5** 给出的区间内选取（或在该区间内网格搜索）。与上表模型名的对应关系如下：
+复现实验时，**CRFDSteer** 的 **`steer.T`** 建议在 **ODESteer 原论文 Table 5** 给出的区间内选取（或在该区间内网格搜索）。与上表模型名的对应关系如下：
 
 | HuggingFace checkpoint | 代码中 `model=` | Range of \(T\) |
 |------------------------|-----------------|----------------|
@@ -257,9 +287,9 @@ uv run python -u scripts/toxicity/detox_eval.py -m <MODEL> -l <LAYER> -d
 - `RE-Control` - [Paper](http://arxiv.org/abs/2406.05954), [Code](https://github.com/Lingkai-Kong/RE-Control)
 - `TruthFlow`- [Paper](http://arxiv.org/abs/2502.04556), [Code](https://github.com/wwwhy725/TruthFlow)
 
-**ODESteer (our methods)**:
-- `ODESteer` - Barrier function-guided ODE Steering (main method)
-- `StepODESteer` - One-step ODESteer variant
+**CRFDSteer (our methods)**:
+- `CRFDSteer` - Barrier function-guided ODE Steering (main method; legacy name `ODESteer` still works)
+- `StepCRFDSteer` - One-step variant (legacy `StepODESteer`)
 
 **Note:** For DNN-based steering methods (HPR, RE-Control, and TruthFlow), please refer to corresponding official repos for detailed implementation.
 
@@ -289,6 +319,8 @@ odesteer/
 **Git 与大数据**：`.gitignore` 默认忽略 `results/`、各数据集的 `texts/`、`activations/`、体积较大的 `data/toxicity/jigsaw/` 与 `data/toxicity/real_tox_prompts/` 等。大文件**不会**随 `git checkout` 恢复，需自行备份或使用 DVC / Git LFS 等方案。
 
 ## Citation
+
+若使用本仓库的 CRFDSteer / ODE-Manifold 扩展，请在正文中写明方法名；引用上游基础方法时请使用以下 **ODESteer（ICLR 2026）** BibTeX。
 
 ```bibtex
 @inproceedings{zhao2026odesteer,

@@ -1,5 +1,5 @@
 '''
-Proposed method by our paper
+Proposed method by our paper (CRFDSteer; legacy alias ODESteer).
 '''
 
 from abc import abstractmethod
@@ -23,7 +23,7 @@ _MANIFOLD_STEER_KEYS = frozenset({
 })
 
 
-class BaseODESteer(Steer):
+class BaseCRFDSteer(Steer):
     def __init__(
         self, 
         solver: Literal['euler', 'midpoint', 'rk4'] = 'euler',
@@ -51,7 +51,7 @@ class BaseODESteer(Steer):
         clf_kwargs = {k: v for k, v in kwargs.items() if k not in _MANIFOLD_STEER_KEYS}
         self.clf = self._init_clf(**clf_kwargs)
                 
-    def fit(self, pos_X: Tensor, neg_X_or_labels: Tensor) -> 'BaseODESteer':
+    def fit(self, pos_X: Tensor, neg_X_or_labels: Tensor) -> 'BaseCRFDSteer':
         self.clf.fit(pos_X, neg_X_or_labels)
         return self
     
@@ -83,18 +83,23 @@ class BaseODESteer(Steer):
         
 
 
-class ODESteer(BaseODESteer):
+class CRFDSteer(BaseCRFDSteer):
     '''
-    ODESteer used in the paper with NormedPolyCntSketch classifier
+    CRFDSteer (paper) with NormedPolyCntSketch classifier.
     '''
     def _init_clf(self, **kwargs) -> NormedPolyClassifier:
         return NormedPolyClassifier(**kwargs)
     
     
-class RFFODESteer(BaseODESteer):
+class RFFCRFDSteer(BaseCRFDSteer):
     '''
-    Ablation study for ODESteer with RFF classifier
+    Ablation study for CRFDSteer with RFF classifier.
     '''
     def _init_clf(self, **kwargs) -> RFFClassifier:
         return RFFClassifier(**kwargs)
-    
+
+
+# Legacy names (upstream ODESteer codebase compatibility)
+BaseODESteer = BaseCRFDSteer
+ODESteer = CRFDSteer
+RFFODESteer = RFFCRFDSteer

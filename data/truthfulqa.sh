@@ -16,7 +16,7 @@ export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 export HF_HOME="${HF_HOME:-/root/autodl-tmp/.cache/huggingface}"
 
 # 离线时让模型也从本地缓存加载（不访问 Hugging Face）
-if [ "${ODESteer_OFFLINE:-0}" = "1" ] || [ "${HF_HUB_OFFLINE:-0}" = "1" ]; then
+if [ "${CRFDSteer_OFFLINE:-0}" = "1" ] || [ "${ODESteer_OFFLINE:-0}" = "1" ] || [ "${HF_HUB_OFFLINE:-0}" = "1" ]; then
   export HF_HUB_OFFLINE=1
 fi
 

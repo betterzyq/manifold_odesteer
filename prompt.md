@@ -1,8 +1,8 @@
-**Cursor 角色设定**：你是一位精通 PyTorch 和大语言模型（LLM）底层架构的 AI 资深工程师。我现在需要你基于你之前对 `ODESteer` 项目的分析总结（即 `ODESteer_代码分析总结.md`），在代码库中实现一个名为 **ODE-Manifold (基于流形边界势垒的常微分方程引导)** 的新方法。
+**Cursor 角色设定**：你是一位精通 PyTorch 和大语言模型（LLM）底层架构的 AI 资深工程师。我现在需要你基于你之前对 `CRFDSteer` 项目的分析总结（即 `CRFDSteer_代码分析总结.md`），在代码库中实现一个名为 **ODE-Manifold (基于流形边界势垒的常微分方程引导)** 的新方法。
 
 **理论背景与目标**：
 
-目前的 ODESteer 在高维欧氏空间中计算向量场 `vf` 并更新激活。我们的目标是将这个过程约束在 LLM 内在的低秩语义流形上：
+目前的 CRFDSteer 在高维欧氏空间中计算向量场 `vf` 并更新激活。我们的目标是将这个过程约束在 LLM 内在的低秩语义流形上：
 
 1. **切空间投影**：将算出的向量场 `vf` 投影到预先提取的正交基 $V_k$ 构成的切空间上。
 2. **保范数收回 (Retraction)**：在沿着切空间更新激活后，强制将其范数恢复到更新前的大小，防止语言生成崩溃（Perplexity 飙升）。
@@ -25,7 +25,7 @@
 
 **1. 修改初始化逻辑**：
 
-在对应的 Steer 类（如 `ODESteer` 或执行 hook 的核心类）的 `__init__` 中，支持传入 `V_k` 矩阵并将其挂载为类属性 `self.V_k`，确保其 `dtype` 和 `device` 与模型激活一致。
+在对应的 Steer 类（如 `CRFDSteer` 或执行 hook 的核心类）的 `__init__` 中，支持传入 `V_k` 矩阵并将其挂载为类属性 `self.V_k`，确保其 `dtype` 和 `device` 与模型激活一致。
 
 **2. 修改 `_step_ode_steer.py` (单步激活添加) 和 `_ode_steer.py` 的 `vector_field`**：
 
@@ -101,7 +101,7 @@ if hasattr(self, 'use_manifold_retraction') and self.use_manifold_retraction:
 ODE-Manifold 完美借用了 `LoRAM` 的**黎曼优化范式（Riemannian Optimization Paradigm）**，但完成了一次华丽的“客场转换”：
 
 - **客场转换**：`LoRAM` 优化的是**模型权重（Weights）**，而 ODE-Manifold 优化/干预的是**推理期的隐状态（Hidden States / Activations）**。
-- **借用核心一：切空间投影（Tangent Space Projection）**。正如 `LoRAM` 不直接使用欧氏梯度 $\nabla f$，而是将其投影到流形的切空间上；ODE-Manifold 也不直接使用 ODESteer 算出的势垒梯度，而是通过 $V_k V_k^T \nabla B(h)$，将其投影到了由高频语义构成的切空间上。这确保了干预方向永远是“符合 LLM 自身逻辑语境”的。
+- **借用核心一：切空间投影（Tangent Space Projection）**。正如 `LoRAM` 不直接使用欧氏梯度 $\nabla f$，而是将其投影到流形的切空间上；ODE-Manifold 也不直接使用 CRFDSteer 算出的势垒梯度，而是通过 $V_k V_k^T \nabla B(h)$，将其投影到了由高频语义构成的切空间上。这确保了干预方向永远是“符合 LLM 自身逻辑语境”的。
 - **借用核心二：收回算子（Retraction）**。在切空间上走一步后，点会脱离流形（切线是直的，流形是弯的）。`LoRAM` 用了 Q-factor retraction 将矩阵重新拉回低秩流形；而 ODE-Manifold 同样引入了 Retraction 步骤，把更新后的激活拉回它该在的“位置”。
 
 ------
@@ -126,4 +126,4 @@ ODE-Manifold 巧妙地将这个结论吸收为黎曼几何中的 **Retraction �
 
 ### 总结
 
-一句话概括：**ODE-Manifold 使用 ODESteer 的势垒函数提供动力，利用 LoRAM 的黎曼优化范式（投影+收回）限定轨迹，并采用 Selective Steering 的保范数操作作为具体的流形收回算子，从而打造出了一个既安全、又极度连贯的动态干预框架。**
+一句话概括：**ODE-Manifold 使用 CRFDSteer 的势垒函数提供动力，利用 LoRAM 的黎曼优化范式（投影+收回）限定轨迹，并采用 Selective Steering 的保范数操作作为具体的流形收回算子，从而打造出了一个既安全、又极度连贯的动态干预框架。**

@@ -25,7 +25,9 @@ modelscope download --model "$REPO" --local_dir "$BASE/snapshots/main"
 可选全局强制仅本地（无网环境）：
 
 ```bash
-export ODESteer_LOCAL_ONLY=1
+export CRFDSteer_LOCAL_ONLY=1
+# 或与旧脚本兼容：
+# export ODESteer_LOCAL_ONLY=1
 ```
 
 ---
@@ -71,7 +73,7 @@ modelscope download --model openai-community/gpt2-xl --local_dir "$BASE/snapshot
 若需改用其它路径或 repo，可设置：
 
 ```bash
-export ODESteer_QUALITY_MODEL="openai-community/gpt2-xl"
+export CRFDSteer_QUALITY_MODEL="openai-community/gpt2-xl"
 ```
 
 ---
@@ -80,11 +82,12 @@ export ODESteer_QUALITY_MODEL="openai-community/gpt2-xl"
 
 | 变量 | 含义 |
 |------|------|
-| `ODESteer_TRUTHFULQA_TRUTH_JUDGE` | Truth judge 的 HF repo id（默认 `allenai/truthfulqa-truth-judge-llama2-7B`） |
-| `ODESteer_TRUTHFULQA_INFO_JUDGE` | Info judge 的 HF repo id（默认 `allenai/truthfulqa-info-judge-llama2-7B`） |
-| `ODESteer_QUALITY_MODEL` | PPL/Dist 模型（默认 `openai-community/gpt2-xl`） |
-| `ODESteer_LOCAL_ONLY=1` | 所有 `from_pretrained` 仅本地，不访问 Hub |
-| `ODESteer_DEBUG_HUB=1` | 打印解析到的本地 snapshot 路径 |
+| `CRFDSteer_TRUTHFULQA_TRUTH_JUDGE` | Truth judge 的 HF repo id（默认 `allenai/truthfulqa-truth-judge-llama2-7B`）；亦可使用旧名 `ODESteer_TRUTHFULQA_TRUTH_JUDGE` |
+| `CRFDSteer_TRUTHFULQA_INFO_JUDGE` | Info judge 的 HF repo id（默认 `allenai/truthfulqa-info-judge-llama2-7B`）；亦可使用旧名 `ODESteer_TRUTHFULQA_INFO_JUDGE` |
+| `CRFDSteer_QUALITY_MODEL` | PPL/Dist 模型（默认 `openai-community/gpt2-xl`）；亦可使用旧名 `ODESteer_QUALITY_MODEL` |
+| `CRFDSteer_LOCAL_ONLY=1` | 所有 `from_pretrained` 仅本地，不访问 Hub（旧名 `ODESteer_LOCAL_ONLY` 仍有效） |
+| `CRFDSteer_DEBUG_HUB=1` | 打印解析到的本地 snapshot 路径（旧名 `ODESteer_DEBUG_HUB` 仍有效） |
+| `CRFDSteer_OFFLINE=1` | 强制离线加载（旧名 `ODESteer_OFFLINE` 仍有效） |
 
 ---
 

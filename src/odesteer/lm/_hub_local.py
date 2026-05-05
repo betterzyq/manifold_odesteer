@@ -156,9 +156,12 @@ def maybe_resolve_pretrained_to_local_path(
     if resolved is None:
         return pretrained_name
 
-    if os.environ.get("ODESteer_DEBUG_HUB", "0") == "1":
+    if (
+        os.environ.get("CRFDSteer_DEBUG_HUB", "0") == "1"
+        or os.environ.get("ODESteer_DEBUG_HUB", "0") == "1"
+    ):
         print(
-            f"[ODESteer] Resolved Hub repo {pretrained_name!r} -> local snapshot {resolved}",
+            f"[CRFDSteer] Resolved Hub repo {pretrained_name!r} -> local snapshot {resolved}",
             flush=True,
         )
     return str(resolved)
@@ -175,7 +178,8 @@ def hf_pretrained_hub_kwargs(model_id: str) -> tuple[str, dict]:
 
     - 加载项目根 ``.env``，使用 ``HF_HOME/hub`` 解析本地 snapshot。
     - 若已解析到带 ``config.json`` 的本地目录，则 ``local_files_only=True``，**不再访问 Hub**。
-    - 另可通过 ``HF_HUB_OFFLINE`` / ``ODESteer_OFFLINE`` / ``ODESteer_LOCAL_ONLY=1`` 强制仅本地。
+    - 另可通过 ``HF_HUB_OFFLINE`` / ``CRFDSteer_OFFLINE``（或 ``ODESteer_OFFLINE``）/
+      ``CRFDSteer_LOCAL_ONLY``（或 ``ODESteer_LOCAL_ONLY``）强制仅本地。
     """
     from ..utils.env import load_project_dotenv
 
@@ -191,7 +195,9 @@ def hf_pretrained_hub_kwargs(model_id: str) -> tuple[str, dict]:
 
     force_local = (
         os.environ.get("HF_HUB_OFFLINE", "0") == "1"
+        or os.environ.get("CRFDSteer_OFFLINE", "0") == "1"
         or os.environ.get("ODESteer_OFFLINE", "0") == "1"
+        or os.environ.get("CRFDSteer_LOCAL_ONLY", "0") == "1"
         or os.environ.get("ODESteer_LOCAL_ONLY", "0") == "1"
         or _is_resolved_local_model_dir(pretrained)
     )

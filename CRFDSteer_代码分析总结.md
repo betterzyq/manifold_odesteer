@@ -1,6 +1,6 @@
-# ODESteer 项目代码分析总结
+# CRFDSteer 项目代码分析总结
 
-本文档结合论文思想总结（`the core idea of the odesteer.md`）对 ODESteer 开源代码进行结构梳理与模块映射，便于后续“爆改”与扩展。
+本文档结合论文思想总结（`the core idea of the odesteer.md`）对 CRFDSteer 开源代码进行结构梳理与模块映射，便于后续“爆改”与扩展。
 
 ---
 
@@ -23,7 +23,7 @@
 ```
 odesteer/
 ├── confs/                    # Hydra 配置
-│   ├── steer/                # 各 Steer 方法配置（ODESteer.yaml 等）
+│   ├── steer/                # 各 Steer 方法配置（CRFDSteer.yaml 等）
 │   ├── truthfulqa.yaml
 │   ├── ultrafeedback.yaml
 │   └── detox.yaml
@@ -124,7 +124,7 @@ odesteer/
 ### 3. 分类器训练模块：\(w\) 与 \(b\) 的构造
 
 - **论文**：用逻辑回归在 \(\phi(a)\) 上拟合正/负样本，得到 \(w'\)、\(b'\)；障碍函数为 \(h(a) = w^\top \phi(a) + b\)，其中 \(w = w'\)，\(b = b' + \log(N_-/N_+)\)。
-- **代码**：`src/odesteer/utils/kernels/_kernel_clf.py` 中的 **`KernelClassifier`**（ODESteer 使用子类 **`NormedPolyClassifier`**，其 `kernel` 为 `NormedPolyCntSketch`）。
+- **代码**：`src/odesteer/utils/kernels/_kernel_clf.py` 中的 **`KernelClassifier`**（CRFDSteer 使用子类 **`NormedPolyClassifier`**，其 `kernel` 为 `NormedPolyCntSketch`）。
 
 #### 3.1 调用 sklearn 逻辑回归
 
@@ -163,7 +163,7 @@ odesteer/
 
 #### 4.1 多步 ODE（`_ode_steer.py`）
 
-- **`BaseODESteer.steer(X, T)`**（33–41 行）：  
+- **`BaseCRFDSteer.steer(X, T)`**（33–41 行）：  
   - 若 `T==0` 直接返回 `X`。  
   - 否则调用 **`torchdiffeq.odeint`**：  
     `odeint(func=lambda t, state: self.vector_field(state), y0=X, t=torch.tensor([0., T], ...), method=self.solver, options={'step_size': T/self.steps})`  
@@ -177,14 +177,14 @@ odesteer/
 
 #### 4.2 单步 ODE（`_step_ode_steer.py`）
 
-- **`BaseStepODESteer.steer(X, T)`**（23–25 行）：  
+- **`BaseStepCRFDSteer.steer(X, T)`**（23–25 行）：  
   `vf = self.vector_field(X)`，然后 `return X + T * vf`。  
 - **`vector_field`** 与多步版一致：`clf.grad(X)` 再 L2 归一化。  
   即论文中的“欧拉法一步”\(a + T\cdot v(a)\)。
 
 #### 4.3 配置与步长
 
-- **ODESteer.yaml**：`solver: euler`，`steps: 10`，即 `odeint` 的 `step_size = T/10`。  
+- **CRFDSteer.yaml**：`solver: euler`，`steps: 10`，即 `odeint` 的 `step_size = T/10`。  
 - 若要“爆改”步长或步数，可改配置中的 `steps` 或传入的 `T`，或改用 `midpoint`/`rk4` 等。
 
 **小结**：  
@@ -198,11 +198,11 @@ odesteer/
 | 文件 | 职责 | 被谁调用 |
 |------|------|----------|
 | `steer/_base_steer.py` | 抽象基类 `Steer`、`VecSteer`（单向量加法） | 所有 steer 实现 |
-| `steer/_ode_steer.py` | 多步 ODE（odeint + NormedPolyClassifier） | `get_steer_model("ODESteer")`，LM 的 steer hook |
-| `steer/_step_ode_steer.py` | 单步 ODE（X + T*v） | `get_steer_model("StepODESteer")` |
+| `steer/_ode_steer.py` | 多步 ODE（odeint + NormedPolyClassifier） | `get_steer_model("CRFDSteer")`，LM 的 steer hook |
+| `steer/_step_ode_steer.py` | 单步 ODE（X + T*v） | `get_steer_model("StepCRFDSteer")` |
 | `utils/kernels/_poly_cnt_sketch.py` | \(\phi\)、\(J_\phi\)、VJP；Normed 版含 L2 归一化 | `_kernel_clf.py` 的 NormedPolyClassifier |
 | `utils/kernels/_kernel_clf.py` | LR 拟合、coef/intercept/dre_coeff、grad/log_dre | `_ode_steer` / `_step_ode_steer` 的 `self.clf` |
-| `utils/kernels/_rff.py` | RFF 核与 jacobian/vjp（消融用） | RFFClassifier / RFFODESteer |
+| `utils/kernels/_rff.py` | RFF 核与 jacobian/vjp（消融用） | RFFClassifier / RFFCRFDSteer |
 | `utils/data.py` | 加载 TQA/UF/毒性 激活与题目 | 各脚本的 load_*、DataLoader |
 | `lm/_huggingface_lm.py` | 模型加载、生成、激活提取、steer hook 注册；导入前 `load_project_dotenv` + 默认 `HF_ENDPOINT`；`get_hub_cache_dir_str` 作 `cache_dir` | 各 scripts 的 generate/chat/eval |
 | `lm/_hub_local.py` | `get_hub_cache_dir_str`、`maybe_resolve_pretrained_to_local_path`、`resolve_hub_snapshot_dir`、`hf_pretrained_hub_kwargs`（`local_files_only`、离线） | `_huggingface_lm`、`metric.py`、`ultrafeedback_eval.py` |
@@ -226,13 +226,13 @@ odesteer/
 - **文件**：`src/odesteer/lm/_hub_local.py`。  
 - **`get_hub_cache_dir_str()`**：返回 Hugging Face **`hub` 根目录**（其下为 `models--org--repo`）。优先级：`HF_HUB_CACHE` → `HF_HOME/hub` → 若均未设置，则探测 **`/root/autodl-tmp/.cache/huggingface/hub`**、**`~/.cache/huggingface/hub`**（目录存在即用）。  
 - **`maybe_resolve_pretrained_to_local_path(repo_id, hub_cache)`**：在 `hub_cache` 下将 **`Skywork/xxx`** 等形式解析为 **`snapshots/<revision>`** 目录（含 `config.json` 与完整权重检查 `snapshot_has_complete_weights`）；失败则仍返回原 repo id。  
-- **`hf_pretrained_hub_kwargs(model_id)`**：合并上述逻辑，返回 `(pretrained_path_or_id, {local_files_only, cache_dir})`；若已解析到本地目录或设置了 `HF_HUB_OFFLINE` / `ODESteer_OFFLINE` / `ODESteer_LOCAL_ONLY`，则 **`local_files_only=True`**，避免无网环境下去连 `huggingface.co`。
+- **`hf_pretrained_hub_kwargs(model_id)`**：合并上述逻辑，返回 `(pretrained_path_or_id, {local_files_only, cache_dir})`；若已解析到本地目录或设置了 `HF_HUB_OFFLINE` / `CRFDSteer_OFFLINE` / `CRFDSteer_LOCAL_ONLY`，则 **`local_files_only=True`**，避免无网环境下去连 `huggingface.co`。
 
 ### 5.3 与评估脚本的差异（Ultrafeedback RM）
 
 - **TruthfulQA / Toxicity 评估**：主要依赖 `metric.py` 中的 Judge、GPT2-XL、Perspective 等，均通过 **`hf_pretrained_hub_kwargs`** 或等价的缓存逻辑加载。  
 - **Ultrafeedback 评估**：额外加载 **序列分类 RM**（默认 Skywork reward）。必须在 **Hub 缓存中有该模型** 或传入 **`-r` 本地路径**；仅下载了主模型而未下载 RM 时，会出现“本地无缓存且无法联网”类错误。  
-- **调试**：设置环境变量 **`ODESteer_DEBUG_HUB=1`** 可打印 repo id → 本地 snapshot 的解析结果（`_hub_local` 内）。
+- **调试**：设置环境变量 **`CRFDSteer_DEBUG_HUB=1`** 可打印 repo id → 本地 snapshot 的解析结果（`_hub_local` 内）。
 
 ---
 
@@ -240,7 +240,7 @@ odesteer/
 
 1. **数据预处理**：若希望**在存储前**就做 \(L_2\) 归一化，可在 `extract_*_activations` 或 `data.py` 的 load 后对激活做 `x / (x.norm(dim=-1, keepdim=True) + eps)`；当前设计是“在 \(\phi\) 入口做”，便于与未归一化数据兼容。  
 2. **\(\phi\) 与 \(J_\phi\)**：  
-   - 改多项式阶数/维度：`degree`、`n_components`（已在 ODESteer.yaml）。  
+   - 改多项式阶数/维度：`degree`、`n_components`（已在 CRFDSteer.yaml）。  
    - 换其他核或草图：可仿照 `NormedPolyCntSketch` 实现 `forward`/`grad` 或 `vjp`，再在 `KernelClassifier` 中换 kernel。  
 3. **分类器与 \(w,b\)**：  
    - 换为 SVM：`lin_clf_type: svm`（已有）；  
@@ -249,7 +249,7 @@ odesteer/
    - 步长/步数：改 `steps`、`T` 或 `options['step_size']`；  
    - 求解器：`solver: midpoint` 或 `rk4`；  
    - 若不用 torchdiffeq：可自行在 `steer()` 里写 for 循环，每步 `state = state + step_size * vector_field(state)`（欧拉），与论文完全一致。  
-5. **\(T\) 取值**：论文 **Table 5** 按 backbone 给出 ODESteer 的 \(T\) 区间；与 `confs/steer/ODESteer.yaml` 默认 `T: 1.0` 不同，复现时应用命令行 **`steer.T=...`** 覆盖（见 `README.md`）。  
+5. **\(T\) 取值**：论文 **Table 5** 按 backbone 给出 CRFDSteer 的 \(T\) 区间；与 `confs/steer/CRFDSteer.yaml` 默认 `T: 1.0` 不同，复现时应用命令行 **`steer.T=...`** 覆盖（见 `README.md`）。  
 6. **Hub 与部署**：若默认探测路径不包含你的数据盘，请在 `.env` 中设置 **`HF_HOME`** 或 **`HF_HUB_CACHE`**；新增机房路径可改 **`get_hub_cache_dir_str`** 中的 `candidate` 列表。
 
 ---

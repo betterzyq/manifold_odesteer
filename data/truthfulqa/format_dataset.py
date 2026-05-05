@@ -14,8 +14,12 @@ from odesteer.utils import get_project_dir
 gen_dir = get_project_dir() / 'data' / 'truthfulqa' / 'texts'
 gen_dir.mkdir(parents = True, exist_ok = True)
 
-# 离线模式：HF_HUB_OFFLINE=1 或 ODESteer_OFFLINE=1 时仅用本地缓存
-_OFFLINE = os.environ.get("HF_HUB_OFFLINE", "0") == "1" or os.environ.get("ODESteer_OFFLINE", "0") == "1"
+# 离线模式：HF_HUB_OFFLINE=1 或 CRFDSteer_OFFLINE / ODESteer_OFFLINE=1 时仅用本地缓存
+_OFFLINE = (
+    os.environ.get("HF_HUB_OFFLINE", "0") == "1"
+    or os.environ.get("CRFDSteer_OFFLINE", "0") == "1"
+    or os.environ.get("ODESteer_OFFLINE", "0") == "1"
+)
 
 # ModelScope 下载目录：设置 TRUTHFULQA_LOCAL_DIR 或使用项目内默认路径 data/truthfulqa/truthful_qa_raw
 _default_local = get_project_dir() / 'data' / 'truthfulqa' / 'truthful_qa_raw'

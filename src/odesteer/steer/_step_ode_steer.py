@@ -1,5 +1,5 @@
 '''
-Step-based ODE steering methods
+Step-based CRFDSteer methods (legacy module name; legacy alias StepODESteer).
 '''
 
 from abc import abstractmethod
@@ -21,7 +21,7 @@ _MANIFOLD_STEER_KEYS = frozenset({
 })
 
 
-class BaseStepODESteer(Steer):
+class BaseStepCRFDSteer(Steer):
     def __init__(self, **kwargs):
         super().__init__()
 
@@ -42,7 +42,7 @@ class BaseStepODESteer(Steer):
         clf_kwargs = {k: v for k, v in kwargs.items() if k not in _MANIFOLD_STEER_KEYS}
         self.clf = self._init_clf(**clf_kwargs)
         
-    def fit(self, pos_X: Tensor, neg_X_or_labels: Tensor) -> 'BaseStepODESteer':
+    def fit(self, pos_X: Tensor, neg_X_or_labels: Tensor) -> 'BaseStepCRFDSteer':
         self.clf.fit(pos_X, neg_X_or_labels)
         return self
     
@@ -67,17 +67,23 @@ class BaseStepODESteer(Steer):
         raise NotImplementedError
 
         
-class StepODESteer(BaseStepODESteer):
+class StepCRFDSteer(BaseStepCRFDSteer):
     '''
-    One-step ODESteer used in the paper with NormedPolyCntSketch classifier
+    One-step CRFDSteer with NormedPolyCntSketch classifier.
     '''
     def _init_clf(self, **kwargs) -> NormedPolyClassifier:
         return NormedPolyClassifier(**kwargs)
     
     
-class RFFStepODESteer(BaseStepODESteer):
+class RFFStepCRFDSteer(BaseStepCRFDSteer):
     '''
-    Ablation study for One-step ODESteer with RFF classifier
+    Ablation study for one-step CRFDSteer with RFF classifier.
     '''
     def _init_clf(self, **kwargs) -> RFFClassifier:
         return RFFClassifier(**kwargs)
+
+
+# Legacy names (upstream ODESteer codebase compatibility)
+BaseStepODESteer = BaseStepCRFDSteer
+StepODESteer = StepCRFDSteer
+RFFStepODESteer = RFFStepCRFDSteer

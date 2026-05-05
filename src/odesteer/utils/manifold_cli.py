@@ -74,7 +74,7 @@ def steer_name_with_manifold_suffix(base_steer_name: str, steer_model_kwargs: di
     - Manifold (``use_manifold`` or ``V_k``): ``-Manifold-k{k}`` (with retraction) or
       ``-Manifold-k{k}-proj`` (projection only).
     - **Euclidean + norm retraction only** (``use_manifold_retraction`` but no ``V_k`` / no
-      ``use_manifold``): ``-NormRetr`` — same vector field as vanilla ODESteer, then scale back
+      ``use_manifold``): ``-NormRetr`` — same vector field as vanilla CRFDSteer, then scale back
       to input L2 norm (ablation for projection).
     """
     use_m = bool(steer_model_kwargs.get("use_manifold"))

@@ -1,7 +1,7 @@
 # ODE-Manifold 使用教程
 
-本教程说明如何在 ODESteer 代码库中使用 **ODE-Manifold**（基于流形边界势垒的常微分方程引导）：在固定低秩子空间上对向量场做**切空间投影**，并在每步（或积分结束后）用**保范数收回（Retraction）**稳定隐状态范数，减轻大幅干预导致的困惑度飙升或生成异常。  
-当前版本中，这套逻辑已可通用于多数 steer（不仅是 ODESteer / StepODESteer）。
+本教程说明如何在 CRFDSteer 代码库中使用 **ODE-Manifold**（基于流形边界势垒的常微分方程引导）：在固定低秩子空间上对向量场做**切空间投影**，并在每步（或积分结束后）用**保范数收回（Retraction）**稳定隐状态范数，减轻大幅干预导致的困惑度飙升或生成异常。  
+当前版本中，这套逻辑已可通用于多数 steer（不仅是 CRFDSteer / StepCRFDSteer）。
 
 > 前置条件与安装、HF 镜像与缓存、离线加载等通用说明见仓库根目录 **[README.md](README.md)**。本教程默认你已完成 `uv sync`，且已按 README 准备好模型与数据。
 
@@ -11,26 +11,26 @@
 
 ODE-Manifold 目前通过基类后处理接入，已覆盖：
 
-- `ODESteer` / `StepODESteer`
+- `CRFDSteer` / `StepCRFDSteer`
 - `CAA` / `RepE` / `ITI`
 - `LinAcT` / `MiMiC`
 
 实现入口见 `src/odesteer/steer/_base_steer.py` 与 `src/odesteer/steer/_manifold.py`（ODE 两类仍保留原有路径）。
 
 1. **切空间投影**  
-   先按原 ODESteer 计算归一化梯度方向 `vf`（与论文一致），若提供了正交基矩阵 `V_k ∈ ℝ^{d×k}`，则替换为：
+   先按原 CRFDSteer 计算归一化梯度方向 `vf`（与论文一致），若提供了正交基矩阵 `V_k ∈ ℝ^{d×k}`，则替换为：
    \[
    v_f \leftarrow V_k V_k^\top v_f
    \]
    即将向量场限制在 `V_k` 张成的子空间内。
 
 2. **保范数收回**  
-   多步积分结束（`ODESteer`）或单步更新后（`StepODESteer`），将新激活 `X_new` 按与更新前 `X` 相同的 L2 范数缩放：
+   多步积分结束（`CRFDSteer`）或单步更新后（`StepCRFDSteer`），将新激活 `X_new` 按与更新前 `X` 相同的 L2 范数缩放：
    \[
    X_{\mathrm{new}} \leftarrow X_{\mathrm{new}} \cdot \frac{\lVert X \rVert_2}{\lVert X_{\mathrm{new}} \rVert_2 + \varepsilon}
    \]
 
-**与原版 ODESteer 的关系**：分类器（多项式计数草图 + 逻辑回归）、障碍函数与 `torchdiffeq.odeint` 的调用方式不变；仅在向量场与输出激活上增加上述两步。对其他 steer（CAA / RepE / ITI / LinAcT / MiMiC）则是通过统一后处理复用同样的投影与收回逻辑。
+**与本仓库 CRFDSteer 核心的关系**：分类器（多项式计数草图 + 逻辑回归）、障碍函数与 `torchdiffeq.odeint` 的调用方式不变；仅在向量场与输出激活上增加上述两步。对其他 steer（CAA / RepE / ITI / LinAcT / MiMiC）则是通过统一后处理复用同样的投影与收回逻辑。
 
 ---
 
@@ -148,7 +148,7 @@ uv run python data/extract_manifold.py \
 ## 5. 阶段 C：生成时启用 ODE-Manifold（通用于多 steer）
 
 支持两种方式：**Hydra 配置**（推荐与实验记录一致）与 **额外命令行标志**（与 Hydra 混用）。  
-当前支持的 steer（`ODESteer`、`StepODESteer`、`CAA`、`RepE`、`ITI`、`LinAcT`、`MiMiC`）都可通过 `steer_model_kwargs` 传入相同流形字段。
+当前支持的 steer（`CRFDSteer`、`StepCRFDSteer`、`CAA`、`RepE`、`ITI`、`LinAcT`、`MiMiC`）都可通过 `steer_model_kwargs` 传入相同流形字段。
 
 **重要（Hydra 命令行）**：这些字段在 YAML 里都写在 **`steer.kwargs`** 下面，与 `solver`、`n_components` 同级。因此命令行覆盖时必须写 **`steer.kwargs.use_manifold=true`**，**不能**写 `steer.use_manifold=true`（否则会报 `Key 'use_manifold' is not in struct`）。`steer.T`、`steer.name` 仍在 `steer` 顶层。
 
@@ -162,16 +162,16 @@ uv run python data/extract_manifold.py \
 | `vk_path` | str / null | `V_k` 的 `.pt` 文件路径（与 `use_manifold=true` 联用） |
 | `V_k` | Tensor（可选） | 若由外部代码注入，可直接传张量；通常由 CLI 合并逻辑从 `vk_path` 加载 |
 | `manifold_dim` | int | 加载后对 `V_k` 按列截断的上限；若文件列数小于该值则不变 |
-| `use_manifold_retraction` | bool | **保范数收回**：积分/单步后按输入范数缩放。与 `use_manifold`/`V_k` **无关**时，表示 **欧氏 ODESteer + 仅收回**（消融：探究投影的作用）；与 `use_manifold` 联用时见下表 |
+| `use_manifold_retraction` | bool | **保范数收回**：积分/单步后按输入范数缩放。与 `use_manifold`/`V_k` **无关**时，表示 **欧氏 CRFDSteer + 仅收回**（消融：探究投影的作用）；与 `use_manifold` 联用时见下表 |
 
 **注意**：仅配置 `vk_path` 而不将 `use_manifold` 设为 `true` 时，**不会**从路径加载 `V_k`，避免误开流形。
 
-**消融对应关系（CLI / Hydra，见 5.3）**（以下以 ODESteer 记号说明，其他 steer 同理）：
+**消融对应关系（CLI / Hydra，见 5.3）**（以下以 CRFDSteer 记号说明，其他 steer 同理）：
 
-1. **Vanilla ODESteer / StepODESteer**：不加流形相关参数。  
-2. **StepODESteer + 投影 + 收回** 或 **ODESteer + 投影 + 收回**：`use_manifold` + `vk_path` + `use_manifold_retraction=true`。  
-3. **ODESteer + 仅投影**：`use_manifold` + `vk_path`，`use_manifold_retraction=false`。  
-4. **ODESteer + 仅保范数（无投影，欧氏梯度 + 收回）**：只设 **`steer.kwargs.use_manifold_retraction=true`**，**不要**设 `use_manifold` / `vk_path`（或 CLI 仅 `--use_manifold_retraction`）。输出文件名自动带 **`-NormRetr`**，与 Vanilla 区分。
+1. **Vanilla CRFDSteer / StepCRFDSteer**：不加流形相关参数。  
+2. **StepCRFDSteer + 投影 + 收回** 或 **CRFDSteer + 投影 + 收回**：`use_manifold` + `vk_path` + `use_manifold_retraction=true`。  
+3. **CRFDSteer + 仅投影**：`use_manifold` + `vk_path`，`use_manifold_retraction=false`。  
+4. **CRFDSteer + 仅保范数（无投影，欧氏梯度 + 收回）**：只设 **`steer.kwargs.use_manifold_retraction=true`**，**不要**设 `use_manifold` / `vk_path`（或 CLI 仅 `--use_manifold_retraction`）。输出文件名自动带 **`-NormRetr`**，与 Vanilla 区分。
 
 已接入流形 CLI 合并的入口脚本：
 
@@ -189,7 +189,7 @@ TruthfulQA 示例（路径请换成你机器上的实际文件）。**完整 Man
 uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
   model=Llama3.1-8B-Base \
   layer_idx=13 \
-  steer=ODESteer \
+  steer=CRFDSteer \
   steer.T=5.0 \
   steer.kwargs.use_manifold=true \
   steer.kwargs.use_manifold_retraction=true \
@@ -201,13 +201,13 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
 
 UltraFeedback / 毒性任务：将脚本与顶层 `config_name` 换成 `ultrafeedback`、`detox`（与 README 一致），流形相关覆盖仍使用 **`steer.kwargs.*`**。
 
-**StepODESteer**：
+**StepCRFDSteer**：
 
 ```bash
 uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
   model=Llama3.1-8B-Base \
   layer_idx=13 \
-  steer=StepODESteer \
+  steer=StepCRFDSteer \
   steer.T=1.0 \
   steer.kwargs.use_manifold=true \
   steer.kwargs.vk_path=/path/to/manifold_Vk_layer13_k128.pt
@@ -247,7 +247,7 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
   --manifold_dim 128 \
   model=Llama3.1-8B-Base \
   layer_idx=13 \
-  steer=ODESteer \
+  steer=CRFDSteer \
   steer.T=5.0
 ```
 
@@ -261,17 +261,17 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
   --manifold_dim 128 \
   model=Llama3.1-8B-Base \
   layer_idx=13 \
-  steer=ODESteer \
+  steer=CRFDSteer \
   steer.T=5.0
 ```
 
-**欧氏 ODESteer + 仅保范数收回（消融 4，无 `V_k`）** — 输出带 **`-NormRetr`**：
+**欧氏 CRFDSteer + 仅保范数收回（消融 4，无 `V_k`）** — 输出带 **`-NormRetr`**：
 
 ```bash
 uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
   model=Llama3.1-8B-Base \
   layer_idx=13 \
-  steer=ODESteer \
+  steer=CRFDSteer \
   steer.T=5.0 \
   steer.kwargs.use_manifold_retraction=true
 ```
@@ -284,7 +284,7 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
 
 ## 6. 与主 README 的交叉引用
 
-- **论文中 ODESteer 的 `T` 取值**：仍请参考主 README「ODESteer: range of T (paper Table 5)」；ODE-Manifold 不改变 `T` 的含义，但投影与收回会改变实际轨迹，可能需要小幅重调 `T`。
+- **论文中 CRFDSteer 的 `T` 取值**：仍请参考主 README「CRFDSteer: range of T (paper Table 5)」；ODE-Manifold 不改变 `T` 的含义，但投影与收回会改变实际轨迹，可能需要小幅重调 `T`。
 - **输出文件名与原版共存**：流形实验为 **`-Manifold-k{k}`** / **`-Manifold-k{k}-proj`**；**仅欧氏 + 收回** 为 **`-NormRetr`**，与 Vanilla 及彼此区分，避免跳过或覆盖评估行。
 - **自定义命名**：若已在 `steer.name` 里手写包含 `Manifold-k{k}`，脚本**不会**重复追加（见 `steer_name_with_manifold_suffix`）。
 - **跳过已存在结果**：同一 **完整** 文件名（含 `-Manifold-k128` 等）已存在时仍会跳过；重跑 Manifold 实验前请删除或改名该 Manifold 专用 `jsonl`（主 README 对原版同理）。
@@ -293,13 +293,19 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
 
 ## 7. 超参数敏感度分析（k 维度）
 
-目标：固定 `T`、`layer_idx`、`steer=ODESteer`，分析流形子空间维度 `k` 对 TruthfulQA 指标 **True × Info** 与 **Perplexity** 的影响。
+目标：固定 `T`、`layer_idx`、`steer=CRFDSteer`，分析流形子空间维度 `k` 对不同任务关键指标的影响：
+
+- TruthfulQA：**True × Info** 与 **Perplexity**
+- Ultrafeedback：**RM Mean** 与 **RM Win-Rate vs NoSteer**
+- RealToxicityPrompts：**Toxicity** 与 **Perplexity**
 
 ### 7.1 一键脚本（推荐）
 
 已提供驱动脚本：
 
-`scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py`
+- `scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py`
+- `scripts/sensitivity/run_ode_manifold_k_sensitivity_ultrafeedback.py`
+- `scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py`
 
 默认配置：
 
@@ -313,17 +319,26 @@ uv run python -u scripts/truthfulqa/truthfulqa_generate.py \
 执行（仓库根目录）：
 
 ```bash
+# TruthfulQA
 uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py
+
+# Ultrafeedback（可选指定 RM）
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_ultrafeedback.py \
+  --reward-model Skywork/Skywork-Reward-V2-Llama-3.1-8B
+
+# RealToxicityPrompts
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py
 ```
 
 该命令按顺序完成：
 
 1. 提取每个 `k` 的 `V_k`（若 `manifold_Vk_layer<L>_k<K>.pt` 已存在则跳过）。
 2. 对每个 `k` 运行 `truthfulqa_generate.py`（若对应 raw jsonl 已存在则跳过）。
-3. 运行 `truthfulqa_eval.py` 汇总评估。
+3. 运行对应任务的 `*_eval.py` 汇总评估。
 4. 读取评估 CSV 并画双轴图：
-   - 左轴：`True * Info`（柱状）
-   - 右轴：`Perplexity`（虚线）
+   - TruthfulQA：左轴 `True * Info`（柱状），右轴 `Perplexity`（虚线）
+   - Ultrafeedback：左轴 `RM Mean`（柱状），右轴 `RM Win-Rate vs NoSteer`（虚线）
+   - RealToxicityPrompts：左轴 `Toxicity`（柱状），右轴 `Perplexity`（虚线）
 
 ### 7.2 只绘图 / 分步执行
 
@@ -331,6 +346,8 @@ uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py
 
 ```bash
 uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py --plot-only
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_ultrafeedback.py --plot-only
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py --plot-only
 ```
 
 仅跳过某阶段：
@@ -339,6 +356,14 @@ uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py -
 uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py --skip-extract
 uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py --skip-generate
 uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py --skip-eval
+
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_ultrafeedback.py --skip-extract
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_ultrafeedback.py --skip-generate
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_ultrafeedback.py --skip-eval
+
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py --skip-extract
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py --skip-generate
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py --skip-eval
 ```
 
 自定义参数示例：
@@ -352,17 +377,46 @@ uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py \
   --ks 16,32,64,128,256,512,1024,4096
 ```
 
+```bash
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_ultrafeedback.py \
+  --model Llama3.1-8B-Base \
+  --layer 13 \
+  --steer-T 5.0 \
+  --seed 42 \
+  --ks 16,32,64,128,256,512,1024,4096 \
+  --reward-model Skywork/Skywork-Reward-V2-Llama-3.1-8B
+```
+
+```bash
+uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py \
+  --model Llama3.1-8B-Base \
+  --layer 13 \
+  --steer-T 5.0 \
+  --seed 42 \
+  --ks 16,32,64,128,256,512,1024,4096
+```
+
 ### 7.3 输出位置
 
 - `V_k`：`data/truthfulqa/activations/<model>/manifold_Vk_layer<L>_k<K>.pt`
 - raw 生成：`results/truthfulqa/raw_outputs/<model>/*.jsonl`
 - 评估 CSV：`results/truthfulqa/eval_results/stat_results/<model>-l<L>-TruthfulQA-seed<S>.csv`
-- 敏感度图：`results/truthfulqa/sensitivity/manifold_k_odesteer_T<T>_l<L>_seed<S>.png`
+- 敏感度图：`results/truthfulqa/sensitivity/manifold_k_crfdsteer_T<T>_l<L>_seed<S>.png`
+
+- `V_k`：`data/ultrafeedback/activations/<model>/manifold_Vk_layer<L>_k<K>.pt`
+- raw 生成：`results/ultrafeedback/raw_outputs/<model>/*.jsonl`
+- 评估 CSV：`results/ultrafeedback/eval_results/stat_results/<model>-l<L>-UltrafeedbackBinarized-seed<S>.csv`
+- 敏感度图：`results/ultrafeedback/sensitivity/manifold_k_crfdsteer_T<T>_l<L>_seed<S>.png`
+
+- `V_k`：`data/toxicity/activations/<model>/manifold_Vk_layer<L>_k<K>.pt`
+- raw 生成：`results/toxicity/raw_outputs/<model>/*.jsonl`
+- 评估 CSV：`results/toxicity/eval_results/stat_results/<model>-l<L>-RealToxicityPrompts-seed<S>.csv`
+- 敏感度图：`results/toxicity/sensitivity/manifold_k_crfdsteer_T<T>_l<L>_seed<S>.png`
 
 ### 7.4 说明
 
 - `k=4096` 表示“请求全维”；实际仍受 SVD 有效秩 `r=min(N,d)` 限制，脚本会自动使用 `k_eff=min(k,r)`。
-- 绘图时默认只统计 **多步 ODESteer + Manifold-k{k}（含 retraction）**，并排除 `-proj` 与 `CLF` 变体，避免混入非本实验条件。
+- 绘图时默认只统计 **多步 CRFDSteer + Manifold-k{k}（含 retraction）**，并排除 `-proj` 与 `CLF` 变体，避免混入非本实验条件。
 
 ---
 
@@ -397,6 +451,8 @@ A：当前实现中投影仅在 `self.V_k is not None` 时启用。若只配置 
 |------|------|
 | `data/extract_manifold.py` | 离线 SVD，写出 `manifold_Vk_layer{L}_k{K}.pt` |
 | `scripts/sensitivity/run_ode_manifold_k_sensitivity_truthfulqa.py` | k 维度敏感度全流程（extract / generate / eval / plot） |
+| `scripts/sensitivity/run_ode_manifold_k_sensitivity_ultrafeedback.py` | Ultrafeedback 的 k 敏感度全流程 |
+| `scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py` | RealToxicityPrompts 的 k 敏感度全流程 |
 | `src/odesteer/steer/_base_steer.py` | 通用流形后处理（向量场投影 / 输出收回） |
 | `src/odesteer/steer/_manifold.py` | 投影、收回、`V_k` 截断与从路径加载 |
 | `src/odesteer/steer/_ode_steer.py` | 多步 `odeint` + 流形逻辑 |
@@ -409,7 +465,7 @@ A：当前实现中投影仅在 `self.V_k is not None` 时启用。若只配置 
 
 ## 10. 引用
 
-若你在论文或报告中同时引用 ODESteer 与本扩展，请至少包含原仓库给出的 **ODESteer BibTeX**（见 [README.md](README.md) 的 Citation 一节），并在正文中说明 ODE-Manifold 为基于该实现的推理期流形扩展。
+若你在论文或报告中同时引用本方法与上游 ODESteer 论文，请至少包含 README 中 **ODESteer（ICLR 2026）的 BibTeX**，并在正文中说明 ODE-Manifold 为基于该实现的推理期流形扩展；论文中请将主方法命名为 **CRFDSteer**（代码中 `steer=CRFDSteer`）。
 
 ---
 

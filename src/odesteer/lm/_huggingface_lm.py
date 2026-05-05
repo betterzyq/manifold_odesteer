@@ -72,7 +72,9 @@ class HuggingFaceLM:
             )
             local_files_only = (
                 os.environ.get("HF_HUB_OFFLINE", "0") == "1"
+                or os.environ.get("CRFDSteer_OFFLINE", "0") == "1"
                 or os.environ.get("ODESteer_OFFLINE", "0") == "1"
+                or os.environ.get("CRFDSteer_LOCAL_ONLY", "0") == "1"
                 or os.environ.get("ODESteer_LOCAL_ONLY", "0") == "1"
                 or resolved_local
             )
