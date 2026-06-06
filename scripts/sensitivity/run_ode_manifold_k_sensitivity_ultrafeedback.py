@@ -4,9 +4,10 @@ ODE-Manifold 子空间维度 k 的超参数敏感度（Ultrafeedback + CRFDSteer
 
 流程：
   1) 对每个 k 调用 data/extract_manifold.py（若对应 .pt 已存在则跳过）
-  2) 对每个 k 调用 scripts/ultrafeedback/ultrafeedback_generate.py（若目标 jsonl 已存在则跳过）
-  3) 调用 scripts/ultrafeedback/ultrafeedback_eval.py 汇总评估
-  4) 从 eval CSV 读取 CRFDSteer+Manifold 各行（兼容旧 CSV 中的 ODESteer 前缀），绘制 RM Mean（左轴）与 Win-Rate（右轴）
+  2) 对每个随机种子、每个 k 调用 scripts/ultrafeedback/ultrafeedback_generate.py（若目标 jsonl 已存在则跳过）
+  3) 每个种子调用 scripts/ultrafeedback/ultrafeedback_eval.py 汇总评估
+  4) 从各 seed 的 eval CSV 聚合 CRFDSteer+Manifold 各行，按 k 计算跨种子均值与样本标准差，
+     并对均值做 bootstrap 95% CI，**仅绘制 RM Win-Rate vs NoSteer**；Ultrafeedback 单独出图。
 
 用法（在仓库根目录）：
   uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_ultrafeedback.py
@@ -25,6 +26,8 @@ from pathlib import Path
 import pandas as pd
 
 from odesteer.utils import get_project_dir
+
+from manifold_k_seed_aggregate import aggregate_metrics_by_k, parse_seeds
 
 
 def run_cmd(cmd: list[str], cwd: Path, env: dict | None = None) -> None:
@@ -192,8 +195,12 @@ def plot_sensitivity(
     project_dir: Path,
     model: str,
     layer: int,
-    seed: int,
+    seeds: tuple[int, ...],
     steer_T: float,
+    *,
+    n_boot: int,
+    bootstrap_seed: int,
+    ci: float,
     outfile: Path | None = None,
 ) -> Path:
     try:
@@ -202,63 +209,67 @@ def plot_sensitivity(
     except ImportError as e:
         raise RuntimeError("matplotlib is required for plotting") from e
 
-    sub = load_manifold_k_rows(project_dir, model, layer, seed)
-    if sub.empty:
-        raise RuntimeError(
-            "No CRFDSteer/ODESteer + Manifold-k rows in eval CSV. Run eval after all generations."
-        )
+    wr_col = "RM Win-Rate vs NoSteer"
+    seed_frames: list[pd.DataFrame] = []
+    for seed in seeds:
+        sub = load_manifold_k_rows(project_dir, model, layer, seed)
+        if sub.empty:
+            raise RuntimeError(
+                f"No CRFDSteer/ODESteer + Manifold-k rows for seed={seed}. Run eval after generations."
+            )
+        seed_frames.append(sub)
 
-    x = sub["_k"].astype(int).tolist()
-    y_rm = sub["RM Mean"].astype(float).tolist()
-    y_wr = sub["RM Win-Rate vs NoSteer"].astype(float).tolist()
+    agg = aggregate_metrics_by_k(
+        seed_frames,
+        [wr_col],
+        k_col="_k",
+        n_boot=n_boot,
+        ci=ci,
+        bootstrap_seed=bootstrap_seed,
+    )
 
-    fig, ax1 = plt.subplots(figsize=(10, 5))
-    color_rm = "#1f77b4"
+    x = agg["_k"].astype(int).tolist()
+    positions = list(range(len(x)))
     color_wr = "#ff7f0e"
 
-    ax1.bar(
-        range(len(x)),
-        y_rm,
-        color=color_rm,
-        alpha=0.85,
-        label="RM Mean",
-        width=0.65,
-    )
-    ax1.set_xlabel("Manifold subspace dimension $k$")
-    ax1.set_ylabel("RM Mean", color=color_rm)
-    ax1.tick_params(axis="y", labelcolor=color_rm)
-    ax1.set_xticks(range(len(x)))
-    ax1.set_xticklabels([str(v) for v in x], rotation=45, ha="right")
-    ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
+    fig, ax1 = plt.subplots(figsize=(10, 5))
 
-    ax2 = ax1.twinx()
-    ax2.plot(
-        range(len(x)),
-        y_wr,
+    wr_mean = f"{wr_col}_mean"
+    wr_lo = f"{wr_col}_ci_lo"
+    wr_hi = f"{wr_col}_ci_hi"
+
+    ax1.plot(
+        positions,
+        agg[wr_mean].tolist(),
         color=color_wr,
-        linestyle="--",
+        linestyle="-",
         marker="o",
         linewidth=2,
         markersize=6,
-        label="RM Win-Rate vs NoSteer",
+        label="Win-Rate (mean)",
     )
-    ax2.set_ylabel("RM Win-Rate vs NoSteer", color=color_wr)
-    ax2.tick_params(axis="y", labelcolor=color_wr)
+    ax1.fill_between(
+        positions,
+        agg[wr_lo].tolist(),
+        agg[wr_hi].tolist(),
+        color=color_wr,
+        alpha=0.22,
+        linewidth=0,
+        label="Win-Rate bootstrap 95% CI",
+    )
+    ax1.set_xlabel("Manifold subspace dimension $k$")
+    ax1.set_ylabel("RM Win-Rate vs NoSteer")
+    ax1.set_xticks(positions)
+    ax1.set_xticklabels([str(v) for v in x], rotation=45, ha="right")
+    ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax1.legend(loc="best", frameon=True)
 
+    seed_tag = "-".join(str(s) for s in seeds)
     fig.suptitle(
-        f"{model} | Ultrafeedback | CRFDSteer + Manifold | layer={layer}, T={steer_T}, seed={seed}"
+        f"{model} | Ultrafeedback | CRFDSteer + Manifold | "
+        f"layer={layer}, T={steer_T}, seeds={seed_tag} | Win-Rate: mean ± bootstrap {int(ci * 100)}% CI"
     )
 
-    lines1, lab1 = ax1.get_legend_handles_labels()
-    lines2, lab2 = ax2.get_legend_handles_labels()
-    ax1.legend(
-        lines1 + lines2,
-        lab1 + lab2,
-        loc="upper left",
-        bbox_to_anchor=(0.01, 0.99),
-        ncol=2,
-        frameon=True,
-    )
     fig.tight_layout(rect=[0, 0.06, 1, 0.96])
 
     out = outfile or (
@@ -266,12 +277,15 @@ def plot_sensitivity(
         / "results"
         / "ultrafeedback"
         / "sensitivity"
-        / f"manifold_k_crfdsteer_T{steer_T}_l{layer}_seed{seed}.png"
+        / f"manifold_k_crfdsteer_T{steer_T}_l{layer}_seeds{seed_tag}_bootci.png"
     )
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=200, bbox_inches="tight")
     plt.close(fig)
+    agg_csv = out.with_name(out.stem + "_aggregate.csv")
+    agg.to_csv(agg_csv, index=False)
     print(f"✓ Saved figure: {out}")
+    print(f"✓ Saved aggregate (mean/std across seeds + bootstrap CI): {agg_csv}")
     return out
 
 
@@ -286,7 +300,18 @@ def main() -> None:
     parser.add_argument("--model", type=str, default="Llama3.1-8B-Base")
     parser.add_argument("--layer", type=int, default=13)
     parser.add_argument("--steer-T", type=float, default=5.0, dest="steer_T")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--seeds",
+        type=str,
+        default="42,123,456",
+        help="Comma-separated random seeds (generate + eval per seed)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="If set, overrides --seeds to a single seed (backward compatibility)",
+    )
     parser.add_argument(
         "--reward-model",
         type=str,
@@ -308,6 +333,9 @@ def main() -> None:
         help="Only load eval CSV and save figure (no extract/generate/eval)",
     )
     parser.add_argument("--output-figure", type=str, default=None, help="PNG path for plot")
+    parser.add_argument("--bootstrap-n", type=int, default=10000)
+    parser.add_argument("--bootstrap-seed", type=int, default=42)
+    parser.add_argument("--ci", type=float, default=0.95)
     parser.add_argument("--uv", type=str, default="uv", help="uv executable name")
     args = parser.parse_args()
 
@@ -315,48 +343,57 @@ def main() -> None:
     os.chdir(project_dir)
     ks = parse_ks(args.ks)
     out_fig = Path(args.output_figure) if args.output_figure else None
+    seeds = (args.seed,) if args.seed is not None else parse_seeds(args.seeds)
 
     if args.plot_only:
         plot_sensitivity(
             project_dir,
             args.model,
             args.layer,
-            args.seed,
+            seeds,
             args.steer_T,
+            n_boot=args.bootstrap_n,
+            bootstrap_seed=args.bootstrap_seed,
+            ci=args.ci,
             outfile=out_fig,
         )
         return
 
-    for k in ks:
-        print(f"\n=== k = {k} ===")
-        step_extract(project_dir, args.model, args.layer, k, args.uv, args.skip_extract)
-        step_generate(
+    for seed in seeds:
+        print(f"\n######## seed = {seed} ########")
+        for k in ks:
+            print(f"\n=== k = {k} ===")
+            step_extract(project_dir, args.model, args.layer, k, args.uv, args.skip_extract)
+            step_generate(
+                project_dir,
+                args.model,
+                args.layer,
+                k,
+                args.steer_T,
+                seed,
+                args.uv,
+                args.skip_generate,
+            )
+
+        step_eval(
             project_dir,
             args.model,
             args.layer,
-            k,
-            args.steer_T,
-            args.seed,
+            seed,
+            args.reward_model,
             args.uv,
-            args.skip_generate,
+            args.skip_eval,
         )
-
-    step_eval(
-        project_dir,
-        args.model,
-        args.layer,
-        args.seed,
-        args.reward_model,
-        args.uv,
-        args.skip_eval,
-    )
 
     plot_sensitivity(
         project_dir,
         args.model,
         args.layer,
-        args.seed,
+        seeds,
         args.steer_T,
+        n_boot=args.bootstrap_n,
+        bootstrap_seed=args.bootstrap_seed,
+        ci=args.ci,
         outfile=out_fig,
     )
 

@@ -366,6 +366,8 @@ uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py --s
 uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py --skip-eval
 ```
 
+**多 seed、论文级 k/L/T 网格（4 模型 × 3 任务 × 8 方法）**：仓库提供 **`scripts/repro/run_multi_seed_grid.py`**，内置各模型在各任务上的流形维度 `k`、层 `L`、CRFD 的 `T`（Qwen 在去毒任务上 `T=48`），并对多 seed 结果汇总 mean±std；详见根目录 **README.md** 中「Multi-seed 完整网格」小节。
+
 自定义参数示例：
 
 ```bash

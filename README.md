@@ -246,6 +246,17 @@ uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_ultrafeedback.p
 uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py --plot-only
 ```
 
+### Multi-seed 完整网格（4 模型 × 3 数据集 × 8 方法，mean±std）
+
+脚本 **`scripts/repro/run_multi_seed_grid.py`** 在多个 `--seeds` 下依次 **generate → eval**，并对各任务 `stat_results` 汇总 **mean±std**（输出至 `results/multi_seed_agg/`）。  
+其中 **CRFDSteer / StepCRFDSteer** 按实验表启用 **ODE-Manifold**（`k`、`L`、`T` 按模型与任务写入脚本常量；Qwen 在 detox 上 **T=48**），并在缺少 `V_k` 时自动调用 **`data/extract_manifold.py`**（可用 `--skip-ensure-vk` 关闭）。  
+可选 **`--crfd-t-json`** / **`--manifold-k-json`** 用 `Model` 或 `Model__dataset_key` 键覆盖默认值。
+
+```bash
+uv run python scripts/repro/run_multi_seed_grid.py --dry-run
+uv run python scripts/repro/run_multi_seed_grid.py --aggregate-only
+```
+
 
 ## Supported Models and Methods
 

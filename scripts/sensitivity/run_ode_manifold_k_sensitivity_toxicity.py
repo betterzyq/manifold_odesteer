@@ -4,13 +4,16 @@ ODE-Manifold 子空间维度 k 的超参数敏感度（RealToxicityPrompts + CRF
 
 流程：
   1) 对每个 k 调用 data/extract_manifold.py（若对应 .pt 已存在则跳过）
-  2) 对每个 k 调用 scripts/toxicity/detox_generate.py（若目标 jsonl 已存在则跳过）
-  3) 调用 scripts/toxicity/detox_eval.py 汇总评估
-  4) 从 eval CSV 读取 CRFDSteer+Manifold 各行（兼容旧 CSV 中的 ODESteer 前缀），绘制 Toxicity（左轴）与 PPL（右轴）
+  2) 对每个随机种子、每个 k 调用 scripts/toxicity/detox_generate.py（若目标 jsonl 已存在则跳过）
+  3) 每个种子调用 scripts/toxicity/detox_eval.py 汇总评估
+  4) 从各 seed 的 eval CSV 读取 CRFDSteer+Manifold 各行，按 k 聚合均值与样本标准差，
+     并对跨种子均值做 bootstrap 95% CI，**仅绘制 Toxicity**；Detoxification 单独出图。
 
 用法（在仓库根目录）：
   uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py
   uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py --plot-only
+  uv run python scripts/sensitivity/run_ode_manifold_k_sensitivity_toxicity.py --plot-only \\
+    --aggregate-csv results/toxicity/sensitivity/manifold_k_crfdsteer_T5.0_l13_seeds42-123-456_bootci_aggregate.csv
 """
 
 from __future__ import annotations
@@ -25,6 +28,8 @@ from pathlib import Path
 import pandas as pd
 
 from odesteer.utils import get_project_dir
+
+from manifold_k_seed_aggregate import aggregate_metrics_by_k, parse_seeds
 
 
 def run_cmd(cmd: list[str], cwd: Path, env: dict | None = None) -> None:
@@ -184,90 +189,145 @@ def load_manifold_k_rows(
     return sub
 
 
-def plot_sensitivity(
-    project_dir: Path,
+def plot_sensitivity_figure(
+    agg: pd.DataFrame,
+    *,
     model: str,
     layer: int,
-    seed: int,
+    seeds: tuple[int, ...],
     steer_T: float,
-    outfile: Path | None = None,
-) -> Path:
+    ci: float,
+    outfile: Path,
+) -> None:
+    """根据已聚合表（含 ``_k``、``Toxicity_mean``、``Toxicity_ci_lo/hi``）绘制单指标图。"""
     try:
         import matplotlib.pyplot as plt
         from matplotlib.ticker import MaxNLocator
     except ImportError as e:
         raise RuntimeError("matplotlib is required for plotting") from e
 
-    sub = load_manifold_k_rows(project_dir, model, layer, seed)
-    if sub.empty:
-        raise RuntimeError(
-            "No CRFDSteer/ODESteer + Manifold-k rows in eval CSV. Run eval after all generations."
-        )
+    required = {"_k", "Toxicity_mean", "Toxicity_ci_lo", "Toxicity_ci_hi"}
+    missing = required - set(agg.columns)
+    if missing:
+        raise ValueError(f"Aggregate CSV missing columns: {sorted(missing)}")
 
-    x = sub["_k"].astype(int).tolist()
-    y_tox = sub["Toxicity"].astype(float).tolist()
-    y_ppl = sub["Perplexity"].astype(float).tolist()
+    agg = agg.sort_values("_k").reset_index(drop=True)
+    x = agg["_k"].astype(int).tolist()
+    positions = list(range(len(x)))
+    color_tox = "#d62728"
 
     fig, ax1 = plt.subplots(figsize=(10, 5))
-    color_tox = "#d62728"
-    color_ppl = "#1f77b4"
-
-    ax1.bar(
-        range(len(x)),
-        y_tox,
+    ax1.plot(
+        positions,
+        agg["Toxicity_mean"].tolist(),
         color=color_tox,
-        alpha=0.85,
-        label="Toxicity",
-        width=0.65,
-    )
-    ax1.set_xlabel("Manifold subspace dimension $k$")
-    ax1.set_ylabel("Toxicity", color=color_tox)
-    ax1.tick_params(axis="y", labelcolor=color_tox)
-    ax1.set_xticks(range(len(x)))
-    ax1.set_xticklabels([str(v) for v in x], rotation=45, ha="right")
-    ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
-
-    ax2 = ax1.twinx()
-    ax2.plot(
-        range(len(x)),
-        y_ppl,
-        color=color_ppl,
-        linestyle="--",
+        linestyle="-",
         marker="o",
         linewidth=2,
         markersize=6,
-        label="Perplexity (PPL)",
+        label="Toxicity (mean)",
     )
-    ax2.set_ylabel("Perplexity (PPL)", color=color_ppl)
-    ax2.tick_params(axis="y", labelcolor=color_ppl)
+    ax1.fill_between(
+        positions,
+        agg["Toxicity_ci_lo"].tolist(),
+        agg["Toxicity_ci_hi"].tolist(),
+        color=color_tox,
+        alpha=0.22,
+        linewidth=0,
+        label="Toxicity bootstrap 95% CI",
+    )
+    ax1.set_xlabel("Manifold subspace dimension $k$")
+    ax1.set_ylabel("Toxicity")
+    ax1.set_xticks(positions)
+    ax1.set_xticklabels([str(v) for v in x], rotation=45, ha="right")
+    ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax1.legend(loc="best", frameon=True)
 
+    seed_tag = "-".join(str(s) for s in seeds)
     fig.suptitle(
-        f"{model} | RealToxicityPrompts | CRFDSteer + Manifold | layer={layer}, T={steer_T}, seed={seed}"
-    )
-
-    lines1, lab1 = ax1.get_legend_handles_labels()
-    lines2, lab2 = ax2.get_legend_handles_labels()
-    ax1.legend(
-        lines1 + lines2,
-        lab1 + lab2,
-        loc="upper left",
-        bbox_to_anchor=(0.01, 0.99),
-        ncol=2,
-        frameon=True,
+        f"{model} | RealToxicityPrompts | CRFDSteer + Manifold | "
+        f"layer={layer}, T={steer_T}, seeds={seed_tag} | Toxicity: mean ± bootstrap {int(ci * 100)}% CI"
     )
     fig.tight_layout(rect=[0, 0.06, 1, 0.96])
+    outfile.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(outfile, dpi=200, bbox_inches="tight")
+    plt.close(fig)
 
+
+def plot_sensitivity_from_aggregate_csv(
+    aggregate_csv: Path,
+    project_dir: Path,
+    model: str,
+    layer: int,
+    seeds: tuple[int, ...],
+    steer_T: float,
+    *,
+    ci: float,
+    outfile: Path | None = None,
+) -> Path:
+    """从 ``*_bootci_aggregate.csv`` 读表出图，不覆盖该 CSV。"""
+    agg = pd.read_csv(aggregate_csv)
+    seed_tag = "-".join(str(s) for s in seeds)
     out = outfile or (
         project_dir
         / "results"
         / "toxicity"
         / "sensitivity"
-        / f"manifold_k_crfdsteer_T{steer_T}_l{layer}_seed{seed}.png"
+        / f"manifold_k_crfdsteer_T{steer_T}_l{layer}_seeds{seed_tag}_bootci.png"
     )
-    out.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out, dpi=200, bbox_inches="tight")
-    plt.close(fig)
+    plot_sensitivity_figure(
+        agg, model=model, layer=layer, seeds=seeds, steer_T=steer_T, ci=ci, outfile=out
+    )
+    print(f"✓ Saved figure from aggregate CSV: {out}")
+    print(f"  (data source: {aggregate_csv})")
+    return out
+
+
+def plot_sensitivity(
+    project_dir: Path,
+    model: str,
+    layer: int,
+    seeds: tuple[int, ...],
+    steer_T: float,
+    *,
+    n_boot: int,
+    bootstrap_seed: int,
+    ci: float,
+    outfile: Path | None = None,
+) -> Path:
+    seed_frames: list[pd.DataFrame] = []
+    for seed in seeds:
+        sub = load_manifold_k_rows(project_dir, model, layer, seed)
+        if sub.empty:
+            raise RuntimeError(
+                f"No CRFDSteer/ODESteer + Manifold-k rows for seed={seed}. Run eval after generations."
+            )
+        seed_frames.append(sub)
+
+    agg = aggregate_metrics_by_k(
+        seed_frames,
+        ["Toxicity"],
+        k_col="_k",
+        n_boot=n_boot,
+        ci=ci,
+        bootstrap_seed=bootstrap_seed,
+    )
+
+    seed_tag = "-".join(str(s) for s in seeds)
+    out = outfile or (
+        project_dir
+        / "results"
+        / "toxicity"
+        / "sensitivity"
+        / f"manifold_k_crfdsteer_T{steer_T}_l{layer}_seeds{seed_tag}_bootci.png"
+    )
+    plot_sensitivity_figure(
+        agg, model=model, layer=layer, seeds=seeds, steer_T=steer_T, ci=ci, outfile=out
+    )
+    agg_csv = out.with_name(out.stem + "_aggregate.csv")
+    agg.to_csv(agg_csv, index=False)
     print(f"✓ Saved figure: {out}")
+    print(f"✓ Saved aggregate (mean/std across seeds + bootstrap CI): {agg_csv}")
     return out
 
 
@@ -282,7 +342,31 @@ def main() -> None:
     parser.add_argument("--model", type=str, default="Llama3.1-8B-Base")
     parser.add_argument("--layer", type=int, default=13)
     parser.add_argument("--steer-T", type=float, default=5.0, dest="steer_T")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--seeds",
+        type=str,
+        default="42,123,456",
+        help="Comma-separated random seeds (generate + eval per seed)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="If set, overrides --seeds to a single seed (backward compatibility)",
+    )
+    parser.add_argument(
+        "--bootstrap-n",
+        type=int,
+        default=10000,
+        help="Bootstrap resamples for mean CI",
+    )
+    parser.add_argument("--bootstrap-seed", type=int, default=42, help="RNG seed for bootstrap")
+    parser.add_argument(
+        "--ci",
+        type=float,
+        default=0.95,
+        help="Confidence level for bootstrap percentile CI on the mean",
+    )
     parser.add_argument(
         "--ks",
         type=str,
@@ -298,6 +382,15 @@ def main() -> None:
         help="Only load eval CSV and save figure (no extract/generate/eval)",
     )
     parser.add_argument("--output-figure", type=str, default=None, help="PNG path for plot")
+    parser.add_argument(
+        "--aggregate-csv",
+        type=str,
+        default=None,
+        help=(
+            "Plot from existing *_bootci_aggregate.csv (does not overwrite the CSV). "
+            "Use with --plot-only to match hand-edited aggregate tables."
+        ),
+    )
     parser.add_argument("--uv", type=str, default="uv", help="uv executable name")
     args = parser.parse_args()
 
@@ -305,40 +398,61 @@ def main() -> None:
     os.chdir(project_dir)
     ks = parse_ks(args.ks)
     out_fig = Path(args.output_figure) if args.output_figure else None
+    seeds = (args.seed,) if args.seed is not None else parse_seeds(args.seeds)
 
     if args.plot_only:
-        plot_sensitivity(
-            project_dir,
-            args.model,
-            args.layer,
-            args.seed,
-            args.steer_T,
-            outfile=out_fig,
-        )
+        if args.aggregate_csv:
+            plot_sensitivity_from_aggregate_csv(
+                Path(args.aggregate_csv),
+                project_dir,
+                args.model,
+                args.layer,
+                seeds,
+                args.steer_T,
+                ci=args.ci,
+                outfile=out_fig,
+            )
+        else:
+            plot_sensitivity(
+                project_dir,
+                args.model,
+                args.layer,
+                seeds,
+                args.steer_T,
+                n_boot=args.bootstrap_n,
+                bootstrap_seed=args.bootstrap_seed,
+                ci=args.ci,
+                outfile=out_fig,
+            )
         return
 
-    for k in ks:
-        print(f"\n=== k = {k} ===")
-        step_extract(project_dir, args.model, args.layer, k, args.uv, args.skip_extract)
-        step_generate(
-            project_dir,
-            args.model,
-            args.layer,
-            k,
-            args.steer_T,
-            args.seed,
-            args.uv,
-            args.skip_generate,
-        )
+    for seed in seeds:
+        print(f"\n######## seed = {seed} ########")
+        for k in ks:
+            print(f"\n=== k = {k} ===")
+            step_extract(project_dir, args.model, args.layer, k, args.uv, args.skip_extract)
+            step_generate(
+                project_dir,
+                args.model,
+                args.layer,
+                k,
+                args.steer_T,
+                seed,
+                args.uv,
+                args.skip_generate,
+            )
 
-    step_eval(project_dir, args.model, args.layer, args.seed, args.uv, args.skip_eval)
+        step_eval(project_dir, args.model, args.layer, seed, args.uv, args.skip_eval)
 
     plot_sensitivity(
         project_dir,
         args.model,
         args.layer,
-        args.seed,
+        seeds,
         args.steer_T,
+        n_boot=args.bootstrap_n,
+        bootstrap_seed=args.bootstrap_seed,
+        ci=args.ci,
         outfile=out_fig,
     )
 
