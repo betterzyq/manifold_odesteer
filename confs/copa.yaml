@@ -1,0 +1,27 @@
+# COPA zero-tuning transfer config for Llama3.1-8B-Base.
+# Inherits TruthfulQA LLaMA settings (layer_idx / seed); method T and CRFDSteer
+# kwargs are resolved in scripts/copa/copa_run.py from the same constants used by
+# scripts/repro/run_multi_seed_grid.py (no COPA-specific hyperparameter search).
+defaults:
+  - _self_
+  - steer: NoSteer
+  - override hydra/hydra_logging: disabled
+  - override hydra/job_logging: disabled
+
+model: Llama3.1-8B-Base
+dataset: copa
+layer_idx: 13
+batch_size: 8
+seed: 42
+# zero-tuning transfer from TruthfulQA Llama3.1-8B (see run_multi_seed_grid.py)
+parameter_source: truthfulqa_llama3.1-8b_zero_tuning_transfer
+manifold_k: 256
+odesteer_T: 5.0
+baseline_T: 1.0
+evaluation_mode: forced_choice_loglikelihood
+mode: full  # smoke | smoke_full_cal | full
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
